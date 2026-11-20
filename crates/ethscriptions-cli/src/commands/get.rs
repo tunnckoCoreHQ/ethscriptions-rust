@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use clap::Args;
-use ethscriptions_sdk::fetcher;
+use ethscriptions_sdk::client::Client;
 use ethscriptions_sdk::normalize::apply_field_selection;
 use ethscriptions_sdk::validate::parse_ethscription_id;
 
@@ -35,12 +35,7 @@ pub struct GetArgs {
     pub with_fields: Option<String>,
 }
 
-pub async fn run(
-    client: &reqwest::Client,
-    args: GetArgs,
-    base_url: Option<&str>,
-    pretty: bool,
-) -> Result<(), String> {
+pub async fn run(client: &Client, args: GetArgs, pretty: bool) -> Result<(), String> {
     let raw = require_text_arg(args.id.as_deref(), "get")?;
     let id =
         parse_ethscription_id(&raw).ok_or_else(|| format!("Invalid ethscription ID: '{raw}'"))?;
@@ -54,7 +49,8 @@ pub async fn run(
     };
 
     if mode.is_none() {
-        let (ethscription, raw_eth) = fetcher::fetch_ethscription(client, &id, base_url)
+        let (ethscription, raw_eth) = client
+            .fetch_ethscription(&id)
             .await
             .map_err(|e| e.to_string())?;
         let selected = apply_field_selection(
@@ -66,7 +62,8 @@ pub async fn run(
         );
         print_json(&selected, pretty);
     } else {
-        let response = fetcher::fetch_ethscription_mode(client, &id, mode, base_url)
+        let response = client
+            .fetch_ethscription_mode(&id, mode)
             .await
             .map_err(|e| e.to_string())?;
 

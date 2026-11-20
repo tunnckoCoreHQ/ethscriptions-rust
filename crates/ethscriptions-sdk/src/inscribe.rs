@@ -13,13 +13,13 @@ use alloy::rpc::types::TransactionRequest;
 use alloy_signer_local::{MnemonicBuilder, PrivateKeySigner, coins_bip39::English};
 use serde::Serialize;
 
+use crate::client::Client;
 use crate::digest::compute_digest;
 use crate::encode::{
     DataUriOptions, InputSource, build_data_uri_with_type, detect_content_type, gzip_bytes,
     optimize_image,
 };
 use crate::error::ApiError;
-use crate::fetcher::{check_exists, estimate_data_cost};
 use crate::types::EstimateCostResult;
 
 #[derive(Debug, Clone, Serialize)]
@@ -106,7 +106,7 @@ pub struct InscribeOptions {
 }
 
 pub async fn prepare_inscribe(
-    client: &reqwest::Client,
+    client: &Client,
     bytes: &[u8],
     options: &PrepareInscribeOptions,
 ) -> Result<(PreparedInscribe, EstimateCostResult), ApiError> {
@@ -137,7 +137,9 @@ pub async fn prepare_inscribe(
         },
     );
     let sha = compute_digest(data_uri.as_bytes());
-    let estimate = estimate_data_cost(client, data_uri.as_bytes(), "fast", 0).await?;
+    let estimate = client
+        .estimate_data_cost(data_uri.as_bytes(), "fast", 0)
+        .await?;
 
     Ok((
         PreparedInscribe {
@@ -153,9 +155,8 @@ pub async fn prepare_inscribe(
 }
 
 pub async fn inscribe(
-    client: &reqwest::Client,
+    client: &Client,
     options: &InscribeOptions,
-    base_url: Option<&str>,
 ) -> Result<InscribeResult, ApiError> {
     let signer_inputs = resolve_signer_inputs(options)?;
     let signer = build_signer(&signer_inputs)?;
@@ -176,7 +177,7 @@ pub async fn inscribe(
     )
     .await?;
 
-    let exists = check_exists(client, &prepared.sha, base_url).await?;
+    let exists = client.check_exists(&prepared.sha).await?;
     if exists.exists && !options.esip6 {
         return Err(ApiError::bad_request(format!(
             "Ethscription already exists for sha {}. Use esip6 to allow duplicates.",

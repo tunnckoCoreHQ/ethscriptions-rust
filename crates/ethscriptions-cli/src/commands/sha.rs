@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::Args;
+use ethscriptions_sdk::client::Client;
 use ethscriptions_sdk::digest::compute_name_digest;
 use serde::Serialize;
 
@@ -53,12 +54,7 @@ fn build_data_uri(bytes: &[u8], no_content_type: bool) -> String {
     )
 }
 
-pub async fn run(
-    client: &reqwest::Client,
-    args: ShaArgs,
-    base_url: Option<&str>,
-    pretty: bool,
-) -> Result<(), String> {
+pub async fn run(client: &Client, args: ShaArgs, pretty: bool) -> Result<(), String> {
     // --name shortcut: compute digest for `data:,{name}`
     if let Some(name) = &args.name {
         let sha = compute_name_digest(name);
@@ -84,7 +80,8 @@ pub async fn run(
     } else {
         None
     };
-    let result = ethscriptions_sdk::fetcher::get_digest_for_data(client, &bytes, false, base_url)
+    let result = client
+        .get_digest_for_data(&bytes, false)
         .await
         .map_err(|e| e.to_string())?;
 

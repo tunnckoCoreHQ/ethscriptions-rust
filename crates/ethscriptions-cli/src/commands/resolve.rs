@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use clap::{Args, CommandFactory};
+use ethscriptions_sdk::client::Client;
 use ethscriptions_sdk::resolve;
 
 use crate::Cli;
@@ -22,12 +23,7 @@ pub struct ResolveArgs {
     pub json: bool,
 }
 
-pub async fn run(
-    client: &reqwest::Client,
-    args: ResolveArgs,
-    base_url: Option<&str>,
-    pretty: bool,
-) -> Result<(), String> {
+pub async fn run(client: &Client, args: ResolveArgs, pretty: bool) -> Result<(), String> {
     let name = match require_text_arg(args.name.as_deref(), "resolve") {
         Ok(val) => val,
         Err(_) => {
@@ -41,9 +37,14 @@ pub async fn run(
         }
     };
 
-    let result = resolve::resolve_user(client, &name, args.check_creator, base_url)
-        .await
-        .map_err(|e| e.to_string())?;
+    let result = resolve::resolve_user(
+        &client.http,
+        &name,
+        args.check_creator,
+        Some(&client.api_url),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
 
     if args.json {
         print_json(&result, pretty);

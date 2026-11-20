@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use clap::Args;
-use ethscriptions_sdk::fetcher;
+use ethscriptions_sdk::client::Client;
 use ethscriptions_sdk::normalize::apply_field_selection_list;
 use ethscriptions_sdk::types::{Ethscription, EthscriptionListResult, Pagination, RawEthscription};
 use ethscriptions_sdk::validate::is_valid_address;
@@ -59,21 +59,16 @@ pub struct ProfileArgs {
     pub with_fields: Option<String>,
 }
 
-pub async fn run(
-    client: &reqwest::Client,
-    args: ProfileArgs,
-    base_url: Option<&str>,
-    pretty: bool,
-) -> Result<(), String> {
+pub async fn run(client: &Client, args: ProfileArgs, pretty: bool) -> Result<(), String> {
     let name = require_text_arg(args.name.as_deref(), "profile")?;
 
     if args.created || args.owned {
-        let output = fetch_profile_list(client, &name, &args, base_url).await?;
+        let output = fetch_profile_list(client, &name, &args).await?;
         print_json(&output, pretty);
         return Ok(());
     }
 
-    let list_result = fetch_profile_state(client, &name, base_url).await?;
+    let list_result = fetch_profile_state(client, &name).await?;
 
     if args.info {
         print_profile_info(client, &list_result.raws, pretty).await?;
@@ -86,9 +81,8 @@ pub async fn run(
 }
 
 async fn fetch_profile_state(
-    client: &reqwest::Client,
+    client: &Client,
     name: &str,
-    base_url: Option<&str>,
 ) -> Result<EthscriptionListResult, String> {
     let mut params = HashMap::new();
     params.insert("creator".to_string(), name.to_string());
@@ -102,7 +96,8 @@ async fn fetch_profile_state(
         params.insert("resolve".to_string(), "true".to_string());
     }
 
-    let list_result = fetcher::fetch_ethscriptions(client, &params, base_url)
+    let list_result = client
+        .fetch_ethscriptions(&params)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -114,10 +109,9 @@ async fn fetch_profile_state(
 }
 
 async fn fetch_profile_list(
-    client: &reqwest::Client,
+    client: &Client,
     name: &str,
     args: &ProfileArgs,
-    base_url: Option<&str>,
 ) -> Result<ListOutput<Vec<serde_json::Value>, Pagination>, String> {
     let mut params = HashMap::new();
 
@@ -130,11 +124,13 @@ async fn fetch_profile_list(
     }
 
     let list_result = if args.created {
-        fetcher::fetch_user_created_ethscriptions(client, name, &params, base_url)
+        client
+            .fetch_user_created_ethscriptions(name, &params)
             .await
             .map_err(|e| e.to_string())?
     } else {
-        fetcher::fetch_user_owned_ethscriptions(client, name, &params, base_url)
+        client
+            .fetch_user_owned_ethscriptions(name, &params)
             .await
             .map_err(|e| e.to_string())?
     };
@@ -180,7 +176,7 @@ fn build_profile_output(
 }
 
 async fn print_profile_info(
-    client: &reqwest::Client,
+    client: &Client,
     raws: &[RawEthscription],
     pretty: bool,
 ) -> Result<(), String> {
@@ -192,10 +188,10 @@ async fn print_profile_info(
         .as_deref()
         .ok_or_else(|| "Profile ethscription is missing content_uri".to_string())?;
 
-    let (content, _content_type) =
-        fetcher::fetch_ethscription_content(client, content_uri, Some(false), Some(false))
-            .await
-            .map_err(|e| e.to_string())?;
+    let (content, _content_type) = client
+        .fetch_ethscription_content(content_uri, Some(false), Some(false))
+        .await
+        .map_err(|e| e.to_string())?;
     let bytes = content.as_bytes();
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|e| format!("Failed to parse profile content JSON: {e}"))?;

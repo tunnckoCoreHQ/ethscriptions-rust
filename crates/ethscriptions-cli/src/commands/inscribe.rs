@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::Args;
+use ethscriptions_sdk::client::Client;
 use ethscriptions_sdk::encode::InputSource;
 use ethscriptions_sdk::inscribe::{self, InscribeOptions};
 
@@ -68,12 +69,7 @@ pub struct InscribeArgs {
     pub chain_id: u64,
 }
 
-pub async fn run(
-    client: &reqwest::Client,
-    args: InscribeArgs,
-    base_url: Option<&str>,
-    pretty: bool,
-) -> Result<(), String> {
+pub async fn run(client: &Client, args: InscribeArgs, pretty: bool) -> Result<(), String> {
     let (bytes, source) = resolve_input(args.file.as_ref(), args.data.as_deref())?;
     let result = inscribe::inscribe(
         client,
@@ -93,7 +89,6 @@ pub async fn run(
             to: args.to,
             chain_id: args.chain_id,
         },
-        base_url,
     )
     .await
     .map_err(|e| e.to_string())?;
