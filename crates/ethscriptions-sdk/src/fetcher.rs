@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::cache::{CacheTtl, load_json_cache, store_json_cache};
+use crate::cache::CacheTtl;
 use crate::client::{Client, Failure};
 use crate::digest::{compute_bytes_digest, estimate_gas};
 use crate::encode::ungzip_bytes;
@@ -105,14 +105,16 @@ impl Client {
         id: &str,
     ) -> Result<(Ethscription, RawEthscription), ApiError> {
         let cache_key = cache_key_from_parts(&[&self.api_url, "ethscription", id]);
-        if let Some(cached) =
-            load_json_cache::<(Ethscription, RawEthscription)>("ethscription", &cache_key)?
+        if let Some(cached) = self
+            .cache
+            .load::<(Ethscription, RawEthscription)>("ethscription", &cache_key)?
         {
             return Ok(cached);
         }
 
         let result = self.fetch_ethscription_uncached(id).await?;
-        store_json_cache("ethscription", &cache_key, CacheTtl::Week, &result)?;
+        self.cache
+            .store("ethscription", &cache_key, CacheTtl::Week, &result)?;
         Ok(result)
     }
 
@@ -288,7 +290,7 @@ impl Client {
 
         let url = format!("{base}/ethscriptions/exists/0x{clean_sha}");
         let cache_key = cache_key_from_parts(&[base, "exists", clean_sha]);
-        if let Some(cached) = load_json_cache::<CheckExistResult>("exists", &cache_key)? {
+        if let Some(cached) = self.cache.load::<CheckExistResult>("exists", &cache_key)? {
             return Ok(cached);
         }
 
@@ -312,7 +314,8 @@ impl Client {
                 exists: true,
                 ethscription,
             };
-            store_json_cache("exists", &cache_key, CacheTtl::Week, &result)?;
+            self.cache
+                .store("exists", &cache_key, CacheTtl::Week, &result)?;
             Ok(result)
         } else {
             Ok(CheckExistResult {

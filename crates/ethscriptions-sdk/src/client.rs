@@ -4,9 +4,10 @@ use bytes::Bytes;
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 
+use crate::cache::Cache;
 use crate::constants::{BASE_API_URL, ENS_API_URL, GAS_API_URL, RPC_URL};
 
-/// Client for the upstream APIs: the HTTP client and the base URLs.
+/// Client for the upstream APIs: the HTTP client, the base URLs, and the cache.
 ///
 /// Endpoints are methods on it, in `fetcher` and `resolve`.
 #[derive(Debug, Clone)]
@@ -20,6 +21,7 @@ pub struct Client {
     pub gas_url: String,
     /// Default Ethereum JSON-RPC URL, used when no RPC URL is configured.
     pub rpc_url: String,
+    pub cache: Cache,
 }
 
 /// Why a GET to an upstream failed. Each endpoint maps it to its own error.
@@ -41,6 +43,7 @@ impl Client {
             ens_url: ENS_API_URL.to_string(),
             gas_url: GAS_API_URL.to_string(),
             rpc_url: RPC_URL.to_string(),
+            cache: Cache::default(),
         }
     }
 
