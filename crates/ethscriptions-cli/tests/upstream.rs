@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
 
-//! Runs the `eths` binary against a local stub upstream and compares exit code,
-//! stdout, stderr, the requests sent, and the cache files with snapshots.
-//! Set `UPDATE_SNAPSHOTS=1` to rewrite the snapshots.
-
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
@@ -123,7 +119,6 @@ fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
-/// Environment for one child run. `None` removes the variable.
 type Env<'a> = &'a [(&'a str, Option<&'a str>)];
 
 struct Case {
@@ -145,7 +140,6 @@ impl Case {
         self.tmp.join("cache")
     }
 
-    /// Run `eths` with `ETHS_CACHE_DIR` set to this case's cache dir.
     fn run(&mut self, stub: Option<&Stub>, args: &[&str]) {
         let cache = self.cache_dir();
         let cache = cache.to_str().unwrap().to_string();
@@ -190,8 +184,6 @@ impl Case {
         ));
     }
 
-    /// Compare the log with the snapshot. Each of `urls` is a base URL used in
-    /// the case: its cache keys become `sha256(<key>)` and its port `PORT`.
     fn check(self, urls: &[&str]) {
         let mut text = self.log.replace(self.tmp.to_str().unwrap(), "$TMP");
         for url in urls {
@@ -211,7 +203,11 @@ impl Case {
             fs::write(&path, &text).unwrap();
         } else {
             let expected = fs::read_to_string(&path).unwrap_or_default();
-            assert_eq!(text, expected, "snapshot {} differs", self.name);
+            assert_eq!(
+                text, expected,
+                "snapshot {} differs; set UPDATE_SNAPSHOTS=1 to rewrite it",
+                self.name
+            );
         }
         let _ = fs::remove_dir_all(&self.tmp);
     }

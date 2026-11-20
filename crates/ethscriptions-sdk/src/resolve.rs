@@ -51,10 +51,9 @@ impl Client {
         primary: bool,
         check_creator: bool,
     ) -> Option<String> {
-        let val = value.to_lowercase();
+        let lowercased = value.to_lowercase();
 
-        // Try ENS resolution first
-        if let Some(ens_data) = self.ens_api_handler(&val).await
+        if let Some(ens_data) = self.ens_api_handler(&lowercased).await
             && let (Some(address), Some(ens)) = (&ens_data.address, &ens_data.ens)
             && !address.is_empty()
             && !ens.is_empty()
@@ -73,8 +72,6 @@ impl Client {
             });
         }
 
-        // Fall back to Ethscription Name resolution
-        // Use the original value (not lowercased) for the name URI, as the SHA is case-sensitive
         let name_sha = compute_name_digest(value);
         let url = format!("{}/ethscriptions/exists/0x{name_sha}", self.api_url);
 
@@ -94,16 +91,12 @@ impl Client {
         None
     }
 
-    /// Call the ENS data API at `https://api.ensdata.net/{val}`.
     async fn ens_api_handler(&self, val: &str) -> Option<EnsDataResponse> {
         let url = format!("{}/{val}", self.ens_url);
         self.get_json(&url).await.ok()
     }
 
     /// Resolve address fields in filter parameters.
-    ///
-    /// For any filter param matching `creator|receiver|owner` whose value is not an address,
-    /// attempt to resolve the name to an address.
     pub async fn resolve_address_patches(
         &self,
         params: &mut std::collections::HashMap<String, String>,

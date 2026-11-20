@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
 
-//! `Client` endpoints against a local stub upstream.
-
 #![allow(clippy::bool_assert_comparison)]
 
 use std::collections::HashMap;
@@ -21,7 +19,6 @@ const ADDR: &str = "0x1111111111111111111111111111111111111111";
 
 type Routes = Arc<Mutex<HashMap<String, (u16, &'static str, Vec<u8>)>>>;
 
-/// HTTP/1.1 server on a free local port. Answers each path with its set reply, else 404.
 struct Stub {
     url: String,
     routes: Routes,
@@ -99,7 +96,6 @@ fn temp_dir() -> PathBuf {
     dir
 }
 
-/// Client with every upstream URL on `stub` and the cache in a fresh temp dir.
 fn client(stub: &Stub) -> Client {
     Client {
         api_url: stub.url.clone(),
@@ -112,7 +108,6 @@ fn client(stub: &Stub) -> Client {
     }
 }
 
-/// URL of a local port that refuses connections.
 fn dead_url() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());

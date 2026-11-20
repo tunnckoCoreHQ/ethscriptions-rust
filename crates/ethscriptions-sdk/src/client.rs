@@ -8,8 +8,6 @@ use crate::cache::Cache;
 use crate::constants::{BASE_API_URL, ENS_API_URL, GAS_API_URL, RPC_URL};
 
 /// Client for the upstream APIs: the HTTP client, the base URLs, and the cache.
-///
-/// Endpoints are methods on it, in `fetcher` and `resolve`.
 #[derive(Debug, Clone)]
 pub struct Client {
     pub http: reqwest::Client,
@@ -24,13 +22,9 @@ pub struct Client {
     pub cache: Cache,
 }
 
-/// Why a GET to an upstream failed. Each endpoint maps it to its own error.
 pub(crate) enum Failure {
-    /// The request could not be sent.
     Send(reqwest::Error),
-    /// The upstream answered with a non-success status.
     Status(StatusCode),
-    /// The response body could not be read or parsed.
     Body(reqwest::Error),
 }
 
@@ -55,12 +49,10 @@ impl Client {
         Ok(resp)
     }
 
-    /// GET `url` and parse the JSON body.
     pub(crate) async fn get_json<T: DeserializeOwned>(&self, url: &str) -> Result<T, Failure> {
         self.get(url).await?.json().await.map_err(Failure::Body)
     }
 
-    /// GET `url` and return its content type (`application/octet-stream` when missing) and body.
     pub(crate) async fn get_bytes(&self, url: &str) -> Result<(String, Bytes), Failure> {
         let resp = self.get(url).await?;
         let content_type = resp

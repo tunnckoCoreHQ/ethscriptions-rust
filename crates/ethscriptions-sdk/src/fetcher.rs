@@ -38,7 +38,6 @@ pub fn fmt_num(v: f64) -> String {
     }
 }
 
-/// Error of the list endpoints (`/ethscriptions`, `/ethscription_transfers`).
 fn list_error(failure: Failure) -> ApiError {
     match failure {
         Failure::Send(e) => ApiError::upstream_error(format!("Fetch failed unexpectedly: {e}")),
@@ -53,7 +52,6 @@ impl Client {
     /// Fetch a list of ethscriptions with optional filters.
     ///
     /// Corresponds to `GET /ethscriptions?{params}`.
-    /// Returns `(normalized, raws, pagination)`.
     pub async fn fetch_ethscriptions(
         &self,
         params: &HashMap<String, String>,
@@ -136,8 +134,6 @@ impl Client {
     }
 
     /// Fetch a single ethscription by ID and return specific mode details.
-    ///
-    /// Modes: "owners", "numbers", or `None` (default JSON).
     pub async fn fetch_ethscription_mode(
         &self,
         id: &str,
@@ -182,7 +178,6 @@ impl Client {
     /// Returns content data (raw bytes or base64-encoded) and the content type.
     ///
     /// # Arguments
-    /// * `content_uri` - The content URI to fetch from
     /// * `base64` - If `Some(true)`, returns base64-encoded string; otherwise raw bytes
     pub async fn fetch_ethscription_content(
         &self,
@@ -280,7 +275,6 @@ impl Client {
     pub async fn check_exists(&self, sha: &str) -> Result<CheckExistResult, ApiError> {
         let base = &self.api_url;
 
-        // Validate SHA
         let clean_sha = sha.strip_prefix("0x").unwrap_or(sha);
         if is_valid_hash(clean_sha) == false {
             return Err(ApiError::bad_request(
