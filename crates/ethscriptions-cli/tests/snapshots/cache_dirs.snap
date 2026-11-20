@@ -1,0 +1,52 @@
+$ eths --base-url http://127.0.0.1:PORT get --only creator 0xabababababababababababababababababababababababababababababababab
+exit: 0
+--- stdout
+{"creator":"0x1111111111111111111111111111111111111111"}
+
+--- stderr
+
+--- requests
+GET /ethscriptions/0xabababababababababababababababababababababababababababababababab
+--- files
+xdg/eths/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+
+$ eths --base-url http://127.0.0.1:PORT get --only creator 0xabababababababababababababababababababababababababababababababab
+exit: 0
+--- stdout
+{"creator":"0x1111111111111111111111111111111111111111"}
+
+--- stderr
+
+--- requests
+GET /ethscriptions/0xabababababababababababababababababababababababababababababababab
+--- files
+home/.cache/eths/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+xdg/eths/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+
+$ eths --base-url http://127.0.0.1:PORT get --only creator 0xabababababababababababababababababababababababababababababababab
+exit: 1
+--- stdout
+
+--- stderr
+Error: Internal error: Cannot determine cache directory; set ETHS_CACHE_DIR or HOME
+
+--- requests
+
+--- files
+home/.cache/eths/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+xdg/eths/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+
+$ eths --base-url http://127.0.0.1:PORT get --only creator 0xabababababababababababababababababababababababababababababababab
+exit: 1
+--- stdout
+
+--- stderr
+Error: Internal error: Failed creating cache dir '$TMP/blocker/ethscription': Not a directory (os error 20)
+
+--- requests
+GET /ethscriptions/0xabababababababababababababababababababababababababababababababab
+--- files
+blocker
+home/.cache/eths/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+xdg/eths/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+

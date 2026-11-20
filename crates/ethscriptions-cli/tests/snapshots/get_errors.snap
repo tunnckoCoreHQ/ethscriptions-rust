@@ -1,0 +1,60 @@
+$ eths --base-url http://127.0.0.1:PORT get 0xabababababababababababababababababababababababababababababababab
+exit: 1
+--- stdout
+
+--- stderr
+Error: Not found: Transaction not found or it is not an Ethscription.
+
+--- requests
+GET /ethscriptions/0xabababababababababababababababababababababababababababababababab
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT get 0xabababababababababababababababababababababababababababababababab
+exit: 1
+--- stdout
+
+--- stderr
+Error: Internal error: Failed to parse upstream response: error decoding response body
+
+--- requests
+GET /ethscriptions/0xabababababababababababababababababababababababababababababababab
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT get 0xabababababababababababababababababababababababababababababababab
+exit: 1
+--- stdout
+
+--- stderr
+Error: Upstream error: Fetch failed unexpectedly: error sending request for url (http://127.0.0.1:PORT/ethscriptions/0xabababababababababababababababababababababababababababababababab)
+
+--- requests
+
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT get --owners 0xabababababababababababababababababababababababababababababababab
+exit: 1
+--- stdout
+
+--- stderr
+Error: Upstream error: Fetch failed unexpectedly: error sending request for url (http://127.0.0.1:PORT/ethscriptions/0xabababababababababababababababababababababababababababababababab)
+
+--- requests
+
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT get nope
+exit: 1
+--- stdout
+
+--- stderr
+Error: Invalid ethscription ID: 'nope'
+
+--- requests
+
+--- files
+
+

@@ -1,0 +1,48 @@
+$ eths --base-url http://127.0.0.1:PORT exists cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+exit: 1
+--- stdout
+
+--- stderr
+Error: Bad request: Failed checking if ethscription exists on the upstream API
+
+--- requests
+GET /ethscriptions/exists/0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT exists cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+exit: 1
+--- stdout
+
+--- stderr
+Error: Internal error: Failed to parse exists response: error decoding response body
+
+--- requests
+GET /ethscriptions/exists/0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT exists cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+exit: 1
+--- stdout
+
+--- stderr
+Error: Internal error: Failed to fetch from upstream API: error sending request for url (http://127.0.0.1:PORT/ethscriptions/exists/0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd)
+
+--- requests
+
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT exists hello
+exit: 1
+--- stdout
+
+--- stderr
+Error: Bad request: Failed checking if ethscription exists on the upstream API
+
+--- requests
+GET /ethscriptions/exists/0x2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+--- files
+
+

@@ -1,0 +1,36 @@
+$ eths --base-url http://127.0.0.1:PORT get --owners 0xabababababababababababababababababababababababababababababababab
+exit: 0
+--- stdout
+{"creator":"0x1111111111111111111111111111111111111111","current":"0x3333333333333333333333333333333333333333","initial":"0x2222222222222222222222222222222222222222","latest_transfer_block":"19000100","latest_transfer_datetime":"2023-11-14T22:33:20.000Z","latest_transfer_hash":"0xfefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe","latest_transfer_timestamp":"1700001200","previous":"0x2222222222222222222222222222222222222222"}
+
+--- stderr
+
+--- requests
+GET /ethscriptions/0xabababababababababababababababababababababababababababababababab
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT get --owners 0xabababababababababababababababababababababababababababababababab
+exit: 0
+--- stdout
+{"creator":"0x1111111111111111111111111111111111111111","current":"0x3333333333333333333333333333333333333333","initial":"0x2222222222222222222222222222222222222222","latest_transfer_block":"19000100","latest_transfer_datetime":"2023-11-14T22:33:20.000Z","latest_transfer_hash":"0xfefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe","latest_transfer_timestamp":"1700001200","previous":"0x2222222222222222222222222222222222222222"}
+
+--- stderr
+
+--- requests
+GET /ethscriptions/0xabababababababababababababababababababababababababababababababab
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT get --owners 0xabababababababababababababababababababababababababababababababab
+exit: 1
+--- stdout
+
+--- stderr
+Error: Not found: Transaction not found or it is not an Ethscription.
+
+--- requests
+GET /ethscriptions/0xabababababababababababababababababababababababababababababababab
+--- files
+
+
