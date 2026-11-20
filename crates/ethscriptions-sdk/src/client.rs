@@ -4,7 +4,7 @@ use bytes::Bytes;
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 
-use crate::constants::BASE_API_URL;
+use crate::constants::{BASE_API_URL, ENS_API_URL};
 
 /// Client for the upstream APIs: the HTTP client and the base URLs.
 ///
@@ -14,6 +14,8 @@ pub struct Client {
     pub http: reqwest::Client,
     /// Ethscriptions API base URL.
     pub api_url: String,
+    /// ENS data API base URL.
+    pub ens_url: String,
 }
 
 /// Why a GET to an upstream failed. Each endpoint maps it to its own error.
@@ -32,6 +34,7 @@ impl Client {
         Self {
             http: reqwest::Client::new(),
             api_url: api_url.unwrap_or(BASE_API_URL).to_string(),
+            ens_url: ENS_API_URL.to_string(),
         }
     }
 

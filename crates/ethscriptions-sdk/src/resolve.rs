@@ -1,121 +1,121 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::constants::BASE_API_URL;
+use crate::client::Client;
 use crate::digest::compute_name_digest;
 use crate::error::ApiError;
 use crate::types::{EnsDataResponse, ResolveUserResult, UpstreamExistsResponse};
 use crate::validate::is_valid_address;
 
-/// Resolve a user identifier (ENS name, Ethscription Name, or address) to an address and name.
-///
-/// If `val` is an address, performs reverse resolution (address -> name).
-/// If `val` is a name, resolves to an address.
-pub async fn resolve_user(
-    client: &reqwest::Client,
-    val: &str,
-    check_creator: bool,
-    base_url: Option<&str>,
-) -> Result<ResolveUserResult, ApiError> {
-    let resolve_name = is_valid_address(val);
+impl Client {
+    /// Resolve a user identifier (ENS name, Ethscription Name, or address) to an address and name.
+    ///
+    /// If `val` is an address, performs reverse resolution (address -> name).
+    /// If `val` is a name, resolves to an address.
+    pub async fn resolve_user(
+        &self,
+        val: &str,
+        check_creator: bool,
+    ) -> Result<ResolveUserResult, ApiError> {
+        let resolve_name = is_valid_address(val);
 
-    let resolved = names_resolver(client, val, resolve_name, false, check_creator, base_url).await;
+        let resolved = self
+            .names_resolver(val, resolve_name, false, check_creator)
+            .await;
 
-    match resolved {
-        Some(resolved_val) => {
-            if resolve_name {
-                Ok(ResolveUserResult {
-                    address: val.to_string(),
-                    name: resolved_val,
-                })
+        match resolved {
+            Some(resolved_val) => {
+                if resolve_name {
+                    Ok(ResolveUserResult {
+                        address: val.to_string(),
+                        name: resolved_val,
+                    })
+                } else {
+                    Ok(ResolveUserResult {
+                        address: resolved_val,
+                        name: val.to_string(),
+                    })
+                }
+            }
+            None => Err(ApiError::not_found(format!("Cannot resolve {val}"))),
+        }
+    }
+
+    /// Core name resolution logic.
+    ///
+    /// 1. Try ENS resolution via ensdata.net API
+    /// 2. Fall back to Ethscription Name resolution (SHA-256 of `data:,{name}`)
+    pub async fn names_resolver(
+        &self,
+        value: &str,
+        resolve_name: bool,
+        primary: bool,
+        check_creator: bool,
+    ) -> Option<String> {
+        let val = value.to_lowercase();
+
+        // Try ENS resolution first
+        if let Some(ens_data) = self.ens_api_handler(&val).await
+            && let (Some(address), Some(ens)) = (&ens_data.address, &ens_data.ens)
+            && !address.is_empty()
+            && !ens.is_empty()
+        {
+            return Some(if resolve_name {
+                if primary {
+                    ens_data
+                        .ens_primary
+                        .unwrap_or_else(|| ens.clone())
+                        .to_lowercase()
+                } else {
+                    ens.to_lowercase()
+                }
             } else {
-                Ok(ResolveUserResult {
-                    address: resolved_val,
-                    name: val.to_string(),
-                })
+                address.to_lowercase()
+            });
+        }
+
+        // Fall back to Ethscription Name resolution
+        // Use the original value (not lowercased) for the name URI, as the SHA is case-sensitive
+        let name_sha = compute_name_digest(value);
+        let url = format!("{}/ethscriptions/exists/0x{name_sha}", self.api_url);
+
+        let data: UpstreamExistsResponse = self.get_json(&url).await.ok()?;
+
+        if data.result.exists
+            && let Some(ref eth) = data.result.ethscription
+        {
+            let owner = if check_creator {
+                eth.creator.clone().unwrap_or_default()
+            } else {
+                eth.current_owner.clone().unwrap_or_default()
+            };
+            return Some(owner.to_lowercase());
+        }
+
+        None
+    }
+
+    /// Call the ENS data API at `https://api.ensdata.net/{val}`.
+    async fn ens_api_handler(&self, val: &str) -> Option<EnsDataResponse> {
+        let url = format!("{}/{val}", self.ens_url);
+        self.get_json(&url).await.ok()
+    }
+
+    /// Resolve address fields in filter parameters.
+    ///
+    /// For any filter param matching `creator|receiver|owner` whose value is not an address,
+    /// attempt to resolve the name to an address.
+    pub async fn resolve_address_patches(
+        &self,
+        params: &mut std::collections::HashMap<String, String>,
+    ) {
+        let address_keys = collect_resolvable_params(params);
+
+        for (key, value) in address_keys {
+            if let Some(resolved) = self.names_resolver(&value, false, false, false).await {
+                params.insert(key, resolved);
             }
         }
-        None => Err(ApiError::not_found(format!("Cannot resolve {val}"))),
     }
-}
-
-/// Core name resolution logic.
-///
-/// 1. Try ENS resolution via ensdata.net API
-/// 2. Fall back to Ethscription Name resolution (SHA-256 of `data:,{name}`)
-pub async fn names_resolver(
-    client: &reqwest::Client,
-    value: &str,
-    resolve_name: bool,
-    primary: bool,
-    check_creator: bool,
-    base_url: Option<&str>,
-) -> Option<String> {
-    let val = value.to_lowercase();
-
-    // Try ENS resolution first
-    if let Some(ens_data) = ens_api_handler(client, &val).await
-        && let (Some(address), Some(ens)) = (&ens_data.address, &ens_data.ens)
-        && !address.is_empty()
-        && !ens.is_empty()
-    {
-        return Some(if resolve_name {
-            if primary {
-                ens_data
-                    .ens_primary
-                    .unwrap_or_else(|| ens.clone())
-                    .to_lowercase()
-            } else {
-                ens.to_lowercase()
-            }
-        } else {
-            address.to_lowercase()
-        });
-    }
-
-    // Fall back to Ethscription Name resolution
-    // Use the original value (not lowercased) for the name URI, as the SHA is case-sensitive
-    let name_sha = compute_name_digest(value);
-    let base = base_url.unwrap_or(BASE_API_URL);
-    let url = format!("{base}/ethscriptions/exists/0x{name_sha}");
-
-    let resp = match client.get(&url).send().await {
-        Ok(r) => r,
-        Err(_) => return None,
-    };
-
-    if !resp.status().is_success() {
-        return None;
-    }
-
-    let data: UpstreamExistsResponse = match resp.json().await {
-        Ok(d) => d,
-        Err(_) => return None,
-    };
-
-    if data.result.exists
-        && let Some(ref eth) = data.result.ethscription
-    {
-        let owner = if check_creator {
-            eth.creator.clone().unwrap_or_default()
-        } else {
-            eth.current_owner.clone().unwrap_or_default()
-        };
-        return Some(owner.to_lowercase());
-    }
-
-    None
-}
-
-/// Call the ENS data API at `https://api.ensdata.net/{val}`.
-async fn ens_api_handler(client: &reqwest::Client, val: &str) -> Option<EnsDataResponse> {
-    let url = format!("https://api.ensdata.net/{val}");
-
-    let resp = client.get(&url).send().await.ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-
-    resp.json::<EnsDataResponse>().await.ok()
 }
 
 /// Check if a filter key is an address field that should be resolved.
@@ -144,25 +144,6 @@ pub fn collect_resolvable_params(
         })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect()
-}
-
-/// Resolve address fields in filter parameters.
-///
-/// For any filter param matching `creator|receiver|owner` whose value is not an address,
-/// attempt to resolve the name to an address.
-pub async fn resolve_address_patches(
-    client: &reqwest::Client,
-    params: &mut std::collections::HashMap<String, String>,
-    base_url: Option<&str>,
-) {
-    let address_keys = collect_resolvable_params(params);
-
-    for (key, value) in address_keys {
-        if let Some(resolved) = names_resolver(client, &value, false, false, false, base_url).await
-        {
-            params.insert(key, resolved);
-        }
-    }
 }
 
 #[cfg(test)]

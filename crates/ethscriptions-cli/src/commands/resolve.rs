@@ -2,7 +2,6 @@
 
 use clap::{Args, CommandFactory};
 use ethscriptions_sdk::client::Client;
-use ethscriptions_sdk::resolve;
 
 use crate::Cli;
 use crate::input::require_text_arg;
@@ -37,14 +36,10 @@ pub async fn run(client: &Client, args: ResolveArgs, pretty: bool) -> Result<(),
         }
     };
 
-    let result = resolve::resolve_user(
-        &client.http,
-        &name,
-        args.check_creator,
-        Some(&client.api_url),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let result = client
+        .resolve_user(&name, args.check_creator)
+        .await
+        .map_err(|e| e.to_string())?;
 
     if args.json {
         print_json(&result, pretty);

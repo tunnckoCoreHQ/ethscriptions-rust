@@ -11,7 +11,6 @@ use crate::filters::normalize_filters;
 use crate::normalize::{
     extract_numbers, extract_owners, normalize_ethscription, normalize_transfers,
 };
-use crate::resolve::resolve_address_patches;
 use crate::types::{
     CheckExistResult, CostBreakdown, CostMeta, DigestResult, EstimateCostResult, Ethscription,
     EthscriptionListResult, EthscriptionTransfer, GasTrackerResponse, ModeResponse, PricesResult,
@@ -63,7 +62,7 @@ impl Client {
 
         let mut params = params.clone();
         if params.remove("resolve").as_deref() == Some("true") {
-            resolve_address_patches(&self.http, &mut params, Some(base)).await;
+            self.resolve_address_patches(&mut params).await;
         }
 
         let normalized = normalize_filters(&params);
@@ -382,7 +381,7 @@ impl Client {
         let base = &self.api_url;
         let mut params = params.clone();
         if params.remove("resolve").as_deref() == Some("true") {
-            resolve_address_patches(&self.http, &mut params, Some(base)).await;
+            self.resolve_address_patches(&mut params).await;
         }
 
         let query_string = build_qs(&normalize_filters(&params));
