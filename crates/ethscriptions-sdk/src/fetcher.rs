@@ -465,9 +465,7 @@ impl Client {
 
     /// Fetch gas prices from ethgastracker.com.
     pub async fn fetch_gas_prices(&self, speed: &str) -> Result<PricesResult, ApiError> {
-        let url = "https://www.ethgastracker.com/api/gas/latest";
-
-        let data: GasTrackerResponse = self.get_json(url).await.map_err(|f| match f {
+        let data: GasTrackerResponse = self.get_json(&self.gas_url).await.map_err(|f| match f {
             Failure::Send(e) => ApiError::internal(format!("Failed to fetch gas prices: {e}")),
             Failure::Status(status) => {
                 ApiError::upstream_error(format!("Failed to fetch gas prices: {status}"))

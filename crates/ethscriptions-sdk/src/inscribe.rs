@@ -209,7 +209,7 @@ pub async fn inscribe(
         signer,
         signer_inputs
             .rpc_url
-            .unwrap_or_else(|| "https://ethereum-rpc.publicnode.com".to_string()),
+            .unwrap_or_else(|| client.rpc_url.clone()),
         normalized_chain_id(options.chain_id),
     )?;
 
