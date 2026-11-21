@@ -1,0 +1,12 @@
+$ eths get --only transaction_hash 0xabababababababababababababababababababababababababababababababab
+exit: 0
+--- stdout
+{"transaction_hash":"0xabababababababababababababababababababababababababababababababab"}
+
+--- stderr
+
+--- requests
+GET /ethscriptions/0xabababababababababababababababababababababababababababababababab
+--- files
+cache/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+

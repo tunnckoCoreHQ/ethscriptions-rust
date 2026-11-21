@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use clap::Args;
+use ethscriptions_sdk::client::Client;
 use ethscriptions_sdk::digest::compute_digest;
-use ethscriptions_sdk::fetcher;
 use ethscriptions_sdk::validate::is_valid_sha256;
 
 use crate::input::{read_input, read_text_arg};
@@ -21,17 +21,10 @@ pub struct ExistsArgs {
     pub file: Option<PathBuf>,
 }
 
-pub async fn run(
-    client: &reqwest::Client,
-    args: ExistsArgs,
-    base_url: Option<&str>,
-    pretty: bool,
-) -> Result<(), String> {
+pub async fn run(client: &Client, args: ExistsArgs, pretty: bool) -> Result<(), String> {
     let sha = resolve_sha(args.file.as_ref(), args.value.as_deref())?;
 
-    let result = fetcher::check_exists(client, &sha, base_url)
-        .await
-        .map_err(|e| e.to_string())?;
+    let result = client.check_exists(&sha).await.map_err(|e| e.to_string())?;
 
     print_json(&result, pretty);
     Ok(())

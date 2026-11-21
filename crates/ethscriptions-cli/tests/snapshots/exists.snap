@@ -1,0 +1,48 @@
+$ eths --base-url http://127.0.0.1:PORT exists cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+exit: 0
+--- stdout
+{"ethscription":null,"exists":false}
+
+--- stderr
+
+--- requests
+GET /ethscriptions/exists/0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT exists cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+exit: 0
+--- stdout
+{"ethscription":null,"exists":false}
+
+--- stderr
+
+--- requests
+GET /ethscriptions/exists/0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT exists 0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+exit: 0
+--- stdout
+{"ethscription":{"block_datetime":"2023-11-14T22:13:20.000Z","block_hash":"0xb10c","block_number":"19000000","block_timestamp":"1700000000","content_path":"/ethscriptions/0xabababababababababababababababababababababababababababababababab/content","content_sha":"0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","content_type":"text/plain","creator":"0x1111111111111111111111111111111111111111","ethscription_id":"0xabababababababababababababababababababababababababababababababab","gas_price":"10","gas_used":"100","has_transfers":true,"is_esip3":false,"is_esip4":false,"is_esip6":false,"is_esip8":false,"media_subtype":"plain","media_type":"text","receiver":"0x2222222222222222222222222222222222222222","transaction_fee":"1000","transaction_hash":"0xabababababababababababababababababababababababababababababababab","transaction_index":"7","transaction_value":"0"},"exists":true}
+
+--- stderr
+
+--- requests
+GET /ethscriptions/exists/0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+--- files
+cache/exists/sha256(http://127.0.0.1:PORT|exists|cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd).json
+
+$ eths --base-url http://127.0.0.1:PORT exists cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+exit: 0
+--- stdout
+{"ethscription":{"block_datetime":"2023-11-14T22:13:20.000Z","block_hash":"0xb10c","block_number":"19000000","block_timestamp":"1700000000","content_path":"/ethscriptions/0xabababababababababababababababababababababababababababababababab/content","content_sha":"0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","content_type":"text/plain","creator":"0x1111111111111111111111111111111111111111","ethscription_id":"0xabababababababababababababababababababababababababababababababab","gas_price":"10","gas_used":"100","has_transfers":true,"is_esip3":false,"is_esip4":false,"is_esip6":false,"is_esip8":false,"media_subtype":"plain","media_type":"text","receiver":"0x2222222222222222222222222222222222222222","transaction_fee":"1000","transaction_hash":"0xabababababababababababababababababababababababababababababababab","transaction_index":"7","transaction_value":"0"},"exists":true}
+
+--- stderr
+
+--- requests
+
+--- files
+cache/exists/sha256(http://127.0.0.1:PORT|exists|cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd).json
+

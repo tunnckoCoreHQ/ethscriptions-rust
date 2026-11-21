@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use clap::Args;
-use ethscriptions_sdk::fetcher;
+use ethscriptions_sdk::client::Client;
 use ethscriptions_sdk::normalize::apply_field_selection_list;
 use serde::Serialize;
 
@@ -162,12 +162,7 @@ struct ListOutput<T: Serialize, P: Serialize> {
     pagination: Option<P>,
 }
 
-pub async fn run(
-    client: &reqwest::Client,
-    args: ListArgs,
-    base_url: Option<&str>,
-    pretty: bool,
-) -> Result<(), String> {
+pub async fn run(client: &Client, args: ListArgs, pretty: bool) -> Result<(), String> {
     let mut params = HashMap::new();
 
     // Address filters
@@ -224,7 +219,8 @@ pub async fn run(
     // Resolve names to addresses
     insert_bool(&mut params, "resolve", args.resolve);
 
-    let list_result = fetcher::fetch_ethscriptions(client, &params, base_url)
+    let list_result = client
+        .fetch_ethscriptions(&params)
         .await
         .map_err(|e| e.to_string())?;
 

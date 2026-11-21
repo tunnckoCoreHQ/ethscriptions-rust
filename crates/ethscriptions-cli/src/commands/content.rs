@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use clap::Args;
-use ethscriptions_sdk::fetcher::{self, ContentData};
+use ethscriptions_sdk::client::Client;
+use ethscriptions_sdk::fetcher::ContentData;
 use ethscriptions_sdk::validate::parse_ethscription_id;
 
 use crate::input::read_text_arg;
@@ -45,18 +46,15 @@ pub struct AttachmentArgs {
     pub output: Option<String>,
 }
 
-pub async fn run_content(
-    client: &reqwest::Client,
-    args: ContentArgs,
-    base_url: Option<&str>,
-) -> Result<(), String> {
+pub async fn run_content(client: &Client, args: ContentArgs) -> Result<(), String> {
     let raw = read_text_arg(args.id.as_deref())?
         .ok_or_else(|| "No ID provided. Pass as argument or pipe via stdin.".to_string())?;
     let id =
         parse_ethscription_id(&raw).ok_or_else(|| format!("Invalid ethscription ID: '{raw}'"))?;
 
     // Fetch the ethscription — use the raw upstream response which always has content_uri
-    let (_ethscription, raw_resp) = fetcher::fetch_ethscription(client, &id, base_url)
+    let (_ethscription, raw_resp) = client
+        .fetch_ethscription(&id)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -65,14 +63,10 @@ pub async fn run_content(
         .as_deref()
         .ok_or_else(|| "Ethscription has no content URI".to_string())?;
 
-    let (data, _content_type) = fetcher::fetch_ethscription_content(
-        client,
-        content_uri,
-        Some(args.base64),
-        Some(args.ungzip),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let (data, _content_type) = client
+        .fetch_ethscription_content(content_uri, Some(args.base64), Some(args.ungzip))
+        .await
+        .map_err(|e| e.to_string())?;
 
     match data {
         ContentData::Base64(encoded) => {
@@ -94,25 +88,16 @@ pub async fn run_content(
     Ok(())
 }
 
-pub async fn run_attachment(
-    client: &reqwest::Client,
-    args: AttachmentArgs,
-    base_url: Option<&str>,
-) -> Result<(), String> {
+pub async fn run_attachment(client: &Client, args: AttachmentArgs) -> Result<(), String> {
     let raw = read_text_arg(args.id.as_deref())?
         .ok_or_else(|| "No ID provided. Pass as argument or pipe via stdin.".to_string())?;
     let id =
         parse_ethscription_id(&raw).ok_or_else(|| format!("Invalid ethscription ID: '{raw}'"))?;
 
-    let data = fetcher::fetch_ethscription_attachment(
-        client,
-        &id,
-        base_url,
-        Some(args.base64),
-        Some(args.ungzip),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let data = client
+        .fetch_ethscription_attachment(&id, Some(args.base64), Some(args.ungzip))
+        .await
+        .map_err(|e| e.to_string())?;
 
     match data {
         ContentData::Base64(encoded) => {

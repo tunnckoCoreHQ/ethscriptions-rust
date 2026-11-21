@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use clap::Args;
+use ethscriptions_sdk::client::Client;
 
 use crate::output::print_json;
 
@@ -68,12 +69,7 @@ fn insert_u32(params: &mut HashMap<String, String>, key: &str, val: Option<u32>)
     }
 }
 
-pub async fn run(
-    client: &reqwest::Client,
-    args: RecentArgs,
-    base_url: Option<&str>,
-    pretty: bool,
-) -> Result<(), String> {
+pub async fn run(client: &Client, args: RecentArgs, pretty: bool) -> Result<(), String> {
     let mut params = HashMap::new();
     insert_str(&mut params, "from_address", &args.from_address);
     insert_str(&mut params, "to_address", &args.to_address);
@@ -91,7 +87,8 @@ pub async fn run(
     insert_str(&mut params, "page_key", &args.page_key);
     insert_bool(&mut params, "resolve", true);
 
-    let result = ethscriptions_sdk::fetcher::fetch_recent_pulse(client, &params, base_url)
+    let result = client
+        .fetch_recent_pulse(&params)
         .await
         .map_err(|e| e.to_string())?;
 

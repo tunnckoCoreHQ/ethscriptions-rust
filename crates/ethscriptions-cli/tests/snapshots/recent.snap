@@ -1,0 +1,60 @@
+$ eths --base-url http://127.0.0.1:PORT recent
+exit: 0
+--- stdout
+{"pagination":{"has_more":false,"page_key":null},"result":[{"block_datetime":"2023-11-14T22:13:20+00:00","block_hash":"0xb1","block_number":"5","block_timestamp":"1700000000","ethscription_id":"0xabababababababababababababababababababababababababababababababab","event_type":"creation","from_address":"0x1111111111111111111111111111111111111111","to_address":"0x1111111111111111111111111111111111111111","transaction_hash":"0xabababababababababababababababababababababababababababababababab","transaction_index":"1","transfer_index":"0"}]}
+
+--- stderr
+
+--- requests
+GET /ethscription_transfers
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT recent --from 0x1111111111111111111111111111111111111111 --page-size 1
+exit: 0
+--- stdout
+{"pagination":{"has_more":false,"page_key":null},"result":[{"block_datetime":"2023-11-14T22:13:20+00:00","block_hash":"0xb1","block_number":"5","block_timestamp":"1700000000","ethscription_id":"0xabababababababababababababababababababababababababababababababab","event_type":"creation","from_address":"0x1111111111111111111111111111111111111111","to_address":"0x1111111111111111111111111111111111111111","transaction_hash":"0xabababababababababababababababababababababababababababababababab","transaction_index":"1","transfer_index":"0"}]}
+
+--- stderr
+
+--- requests
+GET /ethscription_transfers?from_address=0x1111111111111111111111111111111111111111&max_results=1
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT recent
+exit: 1
+--- stdout
+
+--- stderr
+Error: Upstream error: Upstream returned status 502 Bad Gateway
+
+--- requests
+GET /ethscription_transfers
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT recent
+exit: 1
+--- stdout
+
+--- stderr
+Error: Internal error: Failed to parse upstream response: error decoding response body
+
+--- requests
+GET /ethscription_transfers
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT recent
+exit: 1
+--- stdout
+
+--- stderr
+Error: Upstream error: Fetch failed unexpectedly: error sending request for url (http://127.0.0.1:PORT/ethscription_transfers)
+
+--- requests
+
+--- files
+
+

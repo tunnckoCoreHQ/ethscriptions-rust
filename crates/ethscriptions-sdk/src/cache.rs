@@ -32,64 +32,79 @@ struct CacheEntry<T> {
     value: T,
 }
 
-pub fn load_json_cache<T>(namespace: &str, key: &str) -> Result<Option<T>, ApiError>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    let path = cache_file_path(namespace, key)?;
-    if !path.exists() {
-        return Ok(None);
-    }
-
-    let content = fs::read(&path).map_err(|e| {
-        ApiError::internal(format!(
-            "Failed reading cache file '{}': {e}",
-            path.display()
-        ))
-    })?;
-    let entry: CacheEntry<T> = serde_json::from_slice(&content).map_err(|e| {
-        ApiError::internal(format!(
-            "Failed parsing cache file '{}': {e}",
-            path.display()
-        ))
-    })?;
-
-    if entry.expires_at <= now_epoch_seconds() {
-        let _ = fs::remove_file(&path);
-        return Ok(None);
-    }
-
-    Ok(Some(entry.value))
+/// File cache of upstream results: one JSON file per entry, at `<root>/<namespace>/<key>.json`.
+#[derive(Debug, Clone, Default)]
+pub struct Cache {
+    /// Cache directory. `None` reads it from the environment on each use:
+    /// `$ETHS_CACHE_DIR`, else `$XDG_CACHE_HOME/eths`, else `$HOME/.cache/eths`.
+    pub root: Option<PathBuf>,
 }
 
-pub fn store_json_cache<T>(
-    namespace: &str,
-    key: &str,
-    ttl: CacheTtl,
-    value: &T,
-) -> Result<(), ApiError>
-where
-    T: Serialize,
-{
-    let path = cache_file_path(namespace, key)?;
-    ensure_parent_dir(&path)?;
+impl Cache {
+    pub fn load<T>(&self, namespace: &str, key: &str) -> Result<Option<T>, ApiError>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        let path = self.file_path(namespace, key)?;
+        if !path.exists() {
+            return Ok(None);
+        }
 
-    let entry = CacheEntry {
-        expires_at: now_epoch_seconds() + ttl.as_duration().as_secs(),
-        value,
-    };
-    let bytes = serde_json::to_vec(&entry)
-        .map_err(|e| ApiError::internal(format!("Failed serializing cache entry: {e}")))?;
-    fs::write(&path, bytes).map_err(|e| {
-        ApiError::internal(format!(
-            "Failed writing cache file '{}': {e}",
-            path.display()
-        ))
-    })
-}
+        let content = fs::read(&path).map_err(|e| {
+            ApiError::internal(format!(
+                "Failed reading cache file '{}': {e}",
+                path.display()
+            ))
+        })?;
+        let entry: CacheEntry<T> = serde_json::from_slice(&content).map_err(|e| {
+            ApiError::internal(format!(
+                "Failed parsing cache file '{}': {e}",
+                path.display()
+            ))
+        })?;
 
-fn cache_file_path(namespace: &str, key: &str) -> Result<PathBuf, ApiError> {
-    Ok(cache_root()?.join(namespace).join(format!("{key}.json")))
+        if entry.expires_at <= now_epoch_seconds() {
+            let _ = fs::remove_file(&path);
+            return Ok(None);
+        }
+
+        Ok(Some(entry.value))
+    }
+
+    pub fn store<T>(
+        &self,
+        namespace: &str,
+        key: &str,
+        ttl: CacheTtl,
+        value: &T,
+    ) -> Result<(), ApiError>
+    where
+        T: Serialize,
+    {
+        let path = self.file_path(namespace, key)?;
+        ensure_parent_dir(&path)?;
+
+        let entry = CacheEntry {
+            expires_at: now_epoch_seconds() + ttl.as_duration().as_secs(),
+            value,
+        };
+        let bytes = serde_json::to_vec(&entry)
+            .map_err(|e| ApiError::internal(format!("Failed serializing cache entry: {e}")))?;
+        fs::write(&path, bytes).map_err(|e| {
+            ApiError::internal(format!(
+                "Failed writing cache file '{}': {e}",
+                path.display()
+            ))
+        })
+    }
+
+    fn file_path(&self, namespace: &str, key: &str) -> Result<PathBuf, ApiError> {
+        let root = match &self.root {
+            Some(root) => root.clone(),
+            None => cache_root()?,
+        };
+        Ok(root.join(namespace).join(format!("{key}.json")))
+    }
 }
 
 fn ensure_parent_dir(path: &Path) -> Result<(), ApiError> {

@@ -4,6 +4,7 @@
 #![allow(clippy::bool_assert_comparison)]
 
 pub mod cache;
+pub mod client;
 pub mod constants;
 pub mod digest;
 pub mod encode;

@@ -1,0 +1,24 @@
+$ eths --base-url http://127.0.0.1:PORT content 0xabababababababababababababababababababababababababababababababab
+exit: 1
+--- stdout
+
+--- stderr
+Error: Upstream error: Failed to fetch content: error sending request for url (http://127.0.0.1:PORT/blob/two)
+
+--- requests
+GET /ethscriptions/0xabababababababababababababababababababababababababababababababab
+--- files
+cache/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+
+$ eths --base-url http://127.0.0.1:PORT content 0xabababababababababababababababababababababababababababababababab
+exit: 0
+--- stdout
+hi there
+--- stderr
+
+--- requests
+GET /ethscriptions/0xabababababababababababababababababababababababababababababababab
+--- files
+cache/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+cache/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use clap::Args;
+use ethscriptions_sdk::client::Client;
 use ethscriptions_sdk::fetcher;
 use ethscriptions_sdk::validate::parse_ethscription_id;
 
@@ -14,17 +15,13 @@ pub struct TransfersArgs {
     pub id: Option<String>,
 }
 
-pub async fn run(
-    client: &reqwest::Client,
-    args: TransfersArgs,
-    base_url: Option<&str>,
-    pretty: bool,
-) -> Result<(), String> {
+pub async fn run(client: &Client, args: TransfersArgs, pretty: bool) -> Result<(), String> {
     let raw = require_text_arg(args.id.as_deref(), "transfers")?;
     let id =
         parse_ethscription_id(&raw).ok_or_else(|| format!("Invalid ethscription ID: '{raw}'"))?;
 
-    let (_ethscription, raw_eth) = fetcher::fetch_ethscription(client, &id, base_url)
+    let (_ethscription, raw_eth) = client
+        .fetch_ethscription(&id)
         .await
         .map_err(|e| e.to_string())?;
 

@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use crate::cache::{CacheTtl, load_json_cache, store_json_cache};
-use crate::constants::BASE_API_URL;
+use crate::cache::CacheTtl;
+use crate::client::{Client, Failure};
 use crate::digest::{compute_bytes_digest, estimate_gas};
 use crate::encode::ungzip_bytes;
 use crate::error::ApiError;
@@ -11,7 +11,6 @@ use crate::filters::normalize_filters;
 use crate::normalize::{
     extract_numbers, extract_owners, normalize_ethscription, normalize_transfers,
 };
-use crate::resolve::resolve_address_patches;
 use crate::types::{
     CheckExistResult, CostBreakdown, CostMeta, DigestResult, EstimateCostResult, Ethscription,
     EthscriptionListResult, EthscriptionTransfer, GasTrackerResponse, ModeResponse, PricesResult,
@@ -39,233 +38,455 @@ pub fn fmt_num(v: f64) -> String {
     }
 }
 
-/// Fetch a list of ethscriptions with optional filters.
-///
-/// Corresponds to `GET /ethscriptions?{params}`.
-/// Returns `(normalized, raws, pagination)`.
-pub async fn fetch_ethscriptions(
-    client: &reqwest::Client,
-    params: &HashMap<String, String>,
-    base_url: Option<&str>,
-) -> Result<EthscriptionListResult, ApiError> {
-    let base = base_url.unwrap_or(BASE_API_URL);
-
-    let mut params = params.clone();
-    if params.remove("resolve").as_deref() == Some("true") {
-        resolve_address_patches(client, &mut params, base_url).await;
-    }
-
-    let normalized = normalize_filters(&params);
-    let query_string = build_qs(&normalized);
-    let url = if query_string.is_empty() {
-        format!("{base}/ethscriptions")
-    } else {
-        format!("{base}/ethscriptions?{query_string}")
-    };
-
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| ApiError::upstream_error(format!("Fetch failed unexpectedly: {e}")))?;
-
-    if !resp.status().is_success() {
-        return Err(ApiError::upstream_error(format!(
-            "Upstream returned status {}",
-            resp.status()
-        )));
-    }
-
-    let data: UpstreamListResponse = resp
-        .json()
-        .await
-        .map_err(|e| ApiError::internal(format!("Failed to parse upstream response: {e}")))?;
-
-    let ethscriptions: Vec<Ethscription> = data.result.iter().map(normalize_ethscription).collect();
-
-    Ok(EthscriptionListResult {
-        pagination: data.pagination,
-        raws: data.result,
-        result: ethscriptions,
-    })
-}
-
-/// Fetch blobscriptions (ethscriptions with attachments).
-///
-/// Convenience wrapper around `fetch_ethscriptions` with `attachment_present=true`.
-pub async fn fetch_blobscriptions(
-    client: &reqwest::Client,
-    params: &HashMap<String, String>,
-    base_url: Option<&str>,
-) -> Result<EthscriptionListResult, ApiError> {
-    let mut params = params.clone();
-    params.insert("attachment_present".to_string(), "true".to_string());
-    fetch_ethscriptions(client, &params, base_url).await
-}
-
-/// Fetch a single ethscription by ID.
-///
-/// Corresponds to `GET /ethscriptions/{id}`.
-pub async fn fetch_ethscription(
-    client: &reqwest::Client,
-    id: &str,
-    base_url: Option<&str>,
-) -> Result<(Ethscription, RawEthscription), ApiError> {
-    let cache_key = cache_key_from_parts(&[base_url.unwrap_or(BASE_API_URL), "ethscription", id]);
-    if let Some(cached) =
-        load_json_cache::<(Ethscription, RawEthscription)>("ethscription", &cache_key)?
-    {
-        return Ok(cached);
-    }
-
-    let result = fetch_ethscription_uncached(client, id, base_url).await?;
-    store_json_cache("ethscription", &cache_key, CacheTtl::Week, &result)?;
-    Ok(result)
-}
-
-async fn fetch_ethscription_uncached(
-    client: &reqwest::Client,
-    id: &str,
-    base_url: Option<&str>,
-) -> Result<(Ethscription, RawEthscription), ApiError> {
-    let base = base_url.unwrap_or(BASE_API_URL);
-    let url = format!("{base}/ethscriptions/{id}");
-
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| ApiError::upstream_error(format!("Fetch failed unexpectedly: {e}")))?;
-
-    if !resp.status().is_success() {
-        return Err(ApiError::not_found(
-            "Transaction not found or it is not an Ethscription.",
-        ));
-    }
-
-    let data: UpstreamSingleResponse = resp
-        .json()
-        .await
-        .map_err(|e| ApiError::internal(format!("Failed to parse upstream response: {e}")))?;
-
-    let normalized = normalize_ethscription(&data.result);
-    Ok((normalized, data.result))
-}
-
-/// Fetch a single ethscription by ID and return specific mode details.
-///
-/// Modes: "owners", "numbers", or `None` (default JSON).
-pub async fn fetch_ethscription_mode(
-    client: &reqwest::Client,
-    id: &str,
-    mode: Option<&str>,
-    base_url: Option<&str>,
-) -> Result<ModeResponse, ApiError> {
-    match mode {
-        Some("owners") => {
-            let (eth, raw) = fetch_ethscription_uncached(client, id, base_url).await?;
-            let transfers = extract_transfers(&raw);
-            let owners = extract_owners(&eth, &raw, &transfers);
-            Ok(ModeResponse::Json(
-                serde_json::to_value(&owners).unwrap_or_default(),
-            ))
+fn list_error(failure: Failure) -> ApiError {
+    match failure {
+        Failure::Send(e) => ApiError::upstream_error(format!("Fetch failed unexpectedly: {e}")),
+        Failure::Status(status) => {
+            ApiError::upstream_error(format!("Upstream returned status {status}"))
         }
-        Some("numbers") => {
-            let (eth, raw) = fetch_ethscription(client, id, base_url).await?;
-            let transfers = extract_transfers(&raw);
-            let numbers = extract_numbers(&eth, &raw, &transfers);
-            Ok(ModeResponse::Json(
-                serde_json::to_value(&numbers).unwrap_or_default(),
-            ))
-        }
-        Some("transfer") | Some("transfers") => {
-            let (_, raw) = fetch_ethscription(client, id, base_url).await?;
-            let transfers = extract_transfers(&raw);
-            Ok(ModeResponse::Json(
-                serde_json::to_value(&transfers).unwrap_or_default(),
-            ))
-        }
-        _ => {
-            let (eth, _) = fetch_ethscription(client, id, base_url).await?;
-            Ok(ModeResponse::Json(
-                serde_json::to_value(&eth).unwrap_or_default(),
-            ))
-        }
+        Failure::Body(e) => ApiError::internal(format!("Failed to parse upstream response: {e}")),
     }
 }
 
-/// Fetch ethscription content from a content URI.
-///
-/// Handles both HTTP(S) URLs and `data:` URIs.
-/// Returns content data (raw bytes or base64-encoded) and the content type.
-///
-/// # Arguments
-/// * `client` - HTTP client
-/// * `content_uri` - The content URI to fetch from
-/// * `base64` - If `Some(true)`, returns base64-encoded string; otherwise raw bytes
-pub async fn fetch_ethscription_content(
-    client: &reqwest::Client,
-    content_uri: &str,
-    base64: Option<bool>,
-    ungzip: Option<bool>,
-) -> Result<(ContentData, String), ApiError> {
-    let encode_base64 = base64.unwrap_or(false);
-    let decode_gzip = ungzip.unwrap_or(false);
+impl Client {
+    /// Fetch a list of ethscriptions with optional filters.
+    ///
+    /// Corresponds to `GET /ethscriptions?{params}`.
+    pub async fn fetch_ethscriptions(
+        &self,
+        params: &HashMap<String, String>,
+    ) -> Result<EthscriptionListResult, ApiError> {
+        let base = &self.api_url;
 
-    // Handle data: URIs inline — reqwest can't fetch them
-    if content_uri.starts_with("data:") {
-        let (bytes, content_type) = parse_data_uri(content_uri)?;
-        let bytes = if decode_gzip {
-            ungzip_bytes(&bytes).unwrap_or(bytes)
+        let mut params = params.clone();
+        if params.remove("resolve").as_deref() == Some("true") {
+            self.resolve_address_patches(&mut params).await;
+        }
+
+        let normalized = normalize_filters(&params);
+        let query_string = build_qs(&normalized);
+        let url = if query_string.is_empty() {
+            format!("{base}/ethscriptions")
         } else {
-            bytes
+            format!("{base}/ethscriptions?{query_string}")
         };
+
+        let data: UpstreamListResponse = self.get_json(&url).await.map_err(list_error)?;
+
+        let ethscriptions: Vec<Ethscription> =
+            data.result.iter().map(normalize_ethscription).collect();
+
+        Ok(EthscriptionListResult {
+            pagination: data.pagination,
+            raws: data.result,
+            result: ethscriptions,
+        })
+    }
+
+    /// Fetch blobscriptions (ethscriptions with attachments).
+    ///
+    /// Convenience wrapper around `fetch_ethscriptions` with `attachment_present=true`.
+    pub async fn fetch_blobscriptions(
+        &self,
+        params: &HashMap<String, String>,
+    ) -> Result<EthscriptionListResult, ApiError> {
+        let mut params = params.clone();
+        params.insert("attachment_present".to_string(), "true".to_string());
+        self.fetch_ethscriptions(&params).await
+    }
+
+    /// Fetch a single ethscription by ID.
+    ///
+    /// Corresponds to `GET /ethscriptions/{id}`.
+    pub async fn fetch_ethscription(
+        &self,
+        id: &str,
+    ) -> Result<(Ethscription, RawEthscription), ApiError> {
+        let cache_key = cache_key_from_parts(&[&self.api_url, "ethscription", id]);
+        if let Some(cached) = self
+            .cache
+            .load::<(Ethscription, RawEthscription)>("ethscription", &cache_key)?
+        {
+            return Ok(cached);
+        }
+
+        let result = self.fetch_ethscription_uncached(id).await?;
+        self.cache
+            .store("ethscription", &cache_key, CacheTtl::Week, &result)?;
+        Ok(result)
+    }
+
+    async fn fetch_ethscription_uncached(
+        &self,
+        id: &str,
+    ) -> Result<(Ethscription, RawEthscription), ApiError> {
+        let url = format!("{}/ethscriptions/{id}", self.api_url);
+
+        let data: UpstreamSingleResponse = self.get_json(&url).await.map_err(|f| match f {
+            Failure::Status(_) => {
+                ApiError::not_found("Transaction not found or it is not an Ethscription.")
+            }
+            f => list_error(f),
+        })?;
+
+        let normalized = normalize_ethscription(&data.result);
+        Ok((normalized, data.result))
+    }
+
+    /// Fetch a single ethscription by ID and return specific mode details.
+    pub async fn fetch_ethscription_mode(
+        &self,
+        id: &str,
+        mode: Option<&str>,
+    ) -> Result<ModeResponse, ApiError> {
+        match mode {
+            Some("owners") => {
+                let (eth, raw) = self.fetch_ethscription_uncached(id).await?;
+                let transfers = extract_transfers(&raw);
+                let owners = extract_owners(&eth, &raw, &transfers);
+                Ok(ModeResponse::Json(
+                    serde_json::to_value(&owners).unwrap_or_default(),
+                ))
+            }
+            Some("numbers") => {
+                let (eth, raw) = self.fetch_ethscription(id).await?;
+                let transfers = extract_transfers(&raw);
+                let numbers = extract_numbers(&eth, &raw, &transfers);
+                Ok(ModeResponse::Json(
+                    serde_json::to_value(&numbers).unwrap_or_default(),
+                ))
+            }
+            Some("transfer") | Some("transfers") => {
+                let (_, raw) = self.fetch_ethscription(id).await?;
+                let transfers = extract_transfers(&raw);
+                Ok(ModeResponse::Json(
+                    serde_json::to_value(&transfers).unwrap_or_default(),
+                ))
+            }
+            _ => {
+                let (eth, _) = self.fetch_ethscription(id).await?;
+                Ok(ModeResponse::Json(
+                    serde_json::to_value(&eth).unwrap_or_default(),
+                ))
+            }
+        }
+    }
+
+    /// Fetch ethscription content from a content URI.
+    ///
+    /// Handles both HTTP(S) URLs and `data:` URIs.
+    /// Returns content data (raw bytes or base64-encoded) and the content type.
+    ///
+    /// # Arguments
+    /// * `base64` - If `Some(true)`, returns base64-encoded string; otherwise raw bytes
+    pub async fn fetch_ethscription_content(
+        &self,
+        content_uri: &str,
+        base64: Option<bool>,
+        ungzip: Option<bool>,
+    ) -> Result<(ContentData, String), ApiError> {
+        let encode_base64 = base64.unwrap_or(false);
+        let decode_gzip = ungzip.unwrap_or(false);
+
+        // Handle data: URIs inline — reqwest can't fetch them
+        if content_uri.starts_with("data:") {
+            let (bytes, content_type) = parse_data_uri(content_uri)?;
+            let bytes = if decode_gzip {
+                ungzip_bytes(&bytes).unwrap_or(bytes)
+            } else {
+                bytes
+            };
+            let data = if encode_base64 {
+                ContentData::Base64(bytes_to_base64(&bytes))
+            } else {
+                ContentData::Bytes(bytes)
+            };
+            return Ok((data, content_type));
+        }
+
+        let (content_type, bytes) = self.get_bytes(content_uri).await.map_err(|f| match f {
+            Failure::Send(e) => ApiError::upstream_error(format!("Failed to fetch content: {e}")),
+            Failure::Status(status) => ApiError::upstream_error(format!(
+                "Failed to fetch content: upstream returned status {status}"
+            )),
+            Failure::Body(e) => ApiError::internal(format!("Failed to read content bytes: {e}")),
+        })?;
+
+        let bytes = if decode_gzip {
+            ungzip_bytes(&bytes).unwrap_or_else(|_| bytes.to_vec())
+        } else {
+            bytes.to_vec()
+        };
+
         let data = if encode_base64 {
             ContentData::Base64(bytes_to_base64(&bytes))
         } else {
             ContentData::Bytes(bytes)
         };
-        return Ok((data, content_type));
+
+        Ok((data, content_type))
     }
 
-    let resp = client
-        .get(content_uri)
-        .send()
-        .await
-        .map_err(|e| ApiError::upstream_error(format!("Failed to fetch content: {e}")))?;
+    /// Fetch an ethscription's attachment (ESIP-8 blob).
+    ///
+    /// Corresponds to `GET /ethscriptions/{id}/attachment`.
+    ///
+    /// # Arguments
+    /// * `id` - Ethscription ID (transaction hash or number)
+    /// * `base64` - If `Some(true)`, returns base64-encoded string; otherwise raw bytes
+    pub async fn fetch_ethscription_attachment(
+        &self,
+        id: &str,
+        base64: Option<bool>,
+        ungzip: Option<bool>,
+    ) -> Result<ContentData, ApiError> {
+        let encode_base64 = base64.unwrap_or(false);
+        let decode_gzip = ungzip.unwrap_or(false);
+        let url = format!("{}/ethscriptions/{id}/attachment", self.api_url);
 
-    if !resp.status().is_success() {
-        return Err(ApiError::upstream_error(format!(
-            "Failed to fetch content: upstream returned status {}",
-            resp.status()
-        )));
+        let (_, bytes) = self.get_bytes(&url).await.map_err(|f| match f {
+            Failure::Send(e) => {
+                ApiError::upstream_error(format!("Failed to fetch attachment: {e}"))
+            }
+            Failure::Status(_) => {
+                ApiError::not_found("Attachment not found for this ethscription.")
+            }
+            Failure::Body(e) => ApiError::internal(format!("Failed to read attachment bytes: {e}")),
+        })?;
+
+        let bytes = if decode_gzip {
+            ungzip_bytes(&bytes).unwrap_or_else(|_| bytes.to_vec())
+        } else {
+            bytes.to_vec()
+        };
+
+        let data = if encode_base64 {
+            ContentData::Base64(bytes_to_base64(&bytes))
+        } else {
+            ContentData::Bytes(bytes)
+        };
+
+        Ok(data)
     }
 
-    let content_type = resp
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("application/octet-stream")
-        .to_string();
+    /// Check if an ethscription exists by SHA-256 hash.
+    ///
+    /// Corresponds to `GET /ethscriptions/exists/0x{sha}`.
+    pub async fn check_exists(&self, sha: &str) -> Result<CheckExistResult, ApiError> {
+        let base = &self.api_url;
 
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| ApiError::internal(format!("Failed to read content bytes: {e}")))?;
+        let clean_sha = sha.strip_prefix("0x").unwrap_or(sha);
+        if is_valid_hash(clean_sha) == false {
+            return Err(ApiError::bad_request(
+                "Invalid SHA-256 hash, must be 64 hex characters long, or 66 if 0x-prefixed",
+            ));
+        }
 
-    let bytes = if decode_gzip {
-        ungzip_bytes(&bytes).unwrap_or_else(|_| bytes.to_vec())
-    } else {
-        bytes.to_vec()
-    };
+        let url = format!("{base}/ethscriptions/exists/0x{clean_sha}");
+        let cache_key = cache_key_from_parts(&[base, "exists", clean_sha]);
+        if let Some(cached) = self.cache.load::<CheckExistResult>("exists", &cache_key)? {
+            return Ok(cached);
+        }
 
-    let data = if encode_base64 {
-        ContentData::Base64(bytes_to_base64(&bytes))
-    } else {
-        ContentData::Bytes(bytes)
-    };
+        let data: UpstreamExistsResponse = self.get_json(&url).await.map_err(|f| match f {
+            Failure::Send(e) => {
+                ApiError::internal(format!("Failed to fetch from upstream API: {e}"))
+            }
+            Failure::Status(_) => {
+                ApiError::bad_request("Failed checking if ethscription exists on the upstream API")
+            }
+            Failure::Body(e) => ApiError::internal(format!("Failed to parse exists response: {e}")),
+        })?;
 
-    Ok((data, content_type))
+        if data.result.exists {
+            let ethscription = data
+                .result
+                .ethscription
+                .as_ref()
+                .map(normalize_ethscription);
+            let result = CheckExistResult {
+                exists: true,
+                ethscription,
+            };
+            self.cache
+                .store("exists", &cache_key, CacheTtl::Week, &result)?;
+            Ok(result)
+        } else {
+            Ok(CheckExistResult {
+                exists: false,
+                ethscription: None,
+            })
+        }
+    }
+
+    pub async fn fetch_user_created_ethscriptions(
+        &self,
+        value: &str,
+        params: &HashMap<String, String>,
+    ) -> Result<EthscriptionListResult, ApiError> {
+        let mut params = params.clone();
+        params.insert("creator".to_string(), value.to_string());
+        if !is_valid_address(value) {
+            params.insert("resolve".to_string(), "true".to_string());
+        }
+        self.fetch_ethscriptions(&params).await
+    }
+
+    pub async fn fetch_user_owned_ethscriptions(
+        &self,
+        value: &str,
+        params: &HashMap<String, String>,
+    ) -> Result<EthscriptionListResult, ApiError> {
+        let mut params = params.clone();
+        params.insert("current".to_string(), value.to_string());
+        if !is_valid_address(value) {
+            params.insert("resolve".to_string(), "true".to_string());
+        }
+        self.fetch_ethscriptions(&params).await
+    }
+
+    pub async fn fetch_user_profile(&self, value: &str) -> Result<UserProfileResult, ApiError> {
+        let mut params = HashMap::new();
+        params.insert("creator".to_string(), value.to_string());
+        params.insert(
+            "media_subtype".to_string(),
+            "vnd.esc.user.profile+json".to_string(),
+        );
+        params.insert("media_type".to_string(), "application".to_string());
+
+        if !is_valid_address(value) {
+            params.insert("resolve".to_string(), "true".to_string());
+        }
+
+        let ethscriptions = self.fetch_ethscriptions(&params).await?;
+        let Some((latest, previous)) = ethscriptions.result.split_first() else {
+            return Err(ApiError::not_found(format!(
+                "No user profile found for {value}"
+            )));
+        };
+
+        Ok(UserProfileResult {
+            latest: latest.clone(),
+            previous: previous.to_vec(),
+        })
+    }
+
+    pub async fn fetch_recent_pulse(
+        &self,
+        params: &HashMap<String, String>,
+    ) -> Result<RecentPulseResult, ApiError> {
+        let base = &self.api_url;
+        let mut params = params.clone();
+        if params.remove("resolve").as_deref() == Some("true") {
+            self.resolve_address_patches(&mut params).await;
+        }
+
+        let query_string = build_qs(&normalize_filters(&params));
+        let url = if query_string.is_empty() {
+            format!("{base}/ethscription_transfers")
+        } else {
+            format!("{base}/ethscription_transfers?{query_string}")
+        };
+
+        let data: UpstreamPulseResponse = self.get_json(&url).await.map_err(list_error)?;
+
+        Ok(RecentPulseResult {
+            pagination: data.pagination,
+            result: data.result.iter().map(normalize_recent_pulse).collect(),
+        })
+    }
+
+    pub async fn get_digest_for_data(
+        &self,
+        data: &[u8],
+        check_existence: bool,
+    ) -> Result<DigestResult, ApiError> {
+        let (sha, hex, input) = compute_bytes_digest(data);
+        let mut result = DigestResult {
+            ethscription: None,
+            exists: None,
+            hex,
+            input,
+            sha: sha.clone(),
+        };
+
+        if check_existence {
+            let exists = self.check_exists(&sha).await?;
+            result.exists = Some(exists.exists);
+            result.ethscription = exists.ethscription;
+        }
+
+        Ok(result)
+    }
+
+    pub async fn estimate_data_cost(
+        &self,
+        data: &[u8],
+        speed: &str,
+        buffer_fee: u64,
+    ) -> Result<EstimateCostResult, ApiError> {
+        let gas_needed = estimate_gas(data, buffer_fee);
+        let prices = self.fetch_gas_prices(speed).await?;
+
+        let gas_price_gwei: f64 = prices.gas_price.parse().map_err(|e| {
+            ApiError::internal(format!(
+                "Failed to parse gas_price '{}': {e}",
+                prices.gas_price
+            ))
+        })?;
+        let eth_price: f64 = prices.eth_price.parse().map_err(|e| {
+            ApiError::internal(format!(
+                "Failed to parse eth_price '{}': {e}",
+                prices.eth_price
+            ))
+        })?;
+
+        let total_gas_wei = gas_price_gwei * 1_000_000_000.0;
+        let cost_wei = gas_needed as f64 * total_gas_wei;
+        let cost_eth = cost_wei / 1_000_000_000_000_000_000.0;
+        let cost_usd = cost_eth * eth_price;
+
+        Ok(EstimateCostResult {
+            prices,
+            cost: CostBreakdown {
+                wei: fmt_num(cost_wei),
+                eth: fmt_num(cost_eth),
+                usd: fmt_num(cost_usd),
+            },
+            meta: CostMeta {
+                gas_needed: gas_needed.to_string(),
+                input_length: data.len().to_string(),
+            },
+        })
+    }
+
+    /// Fetch gas prices from ethgastracker.com.
+    pub async fn fetch_gas_prices(&self, speed: &str) -> Result<PricesResult, ApiError> {
+        let data: GasTrackerResponse = self.get_json(&self.gas_url).await.map_err(|f| match f {
+            Failure::Send(e) => ApiError::internal(format!("Failed to fetch gas prices: {e}")),
+            Failure::Status(status) => {
+                ApiError::upstream_error(format!("Failed to fetch gas prices: {status}"))
+            }
+            Failure::Body(e) => {
+                ApiError::internal(format!("Failed to parse gas tracker response: {e}"))
+            }
+        })?;
+
+        let oracle_speed = match speed {
+            "fast" => &data.data.oracle.fast,
+            _ => &data.data.oracle.normal,
+        };
+
+        Ok(PricesResult {
+            block_number: data.data.block_nr,
+            base_fee: fmt_num(data.data.base_fee),
+            next_fee: fmt_num(data.data.next_fee),
+            eth_price: fmt_num(data.data.eth_price),
+            gas_price: fmt_num(oracle_speed.gwei),
+            gas_fee: fmt_num(oracle_speed.gas_fee),
+            priority_fee: fmt_num(oracle_speed.priority_fee),
+        })
+    }
 }
 
 /// Encode bytes as base64 string.
@@ -370,332 +591,12 @@ fn percent_decode(input: &str) -> Result<Vec<u8>, ApiError> {
     Ok(decoded)
 }
 
-/// Fetch an ethscription's attachment (ESIP-8 blob).
-///
-/// Corresponds to `GET /ethscriptions/{id}/attachment`.
-///
-/// # Arguments
-/// * `client` - HTTP client
-/// * `id` - Ethscription ID (transaction hash or number)
-/// * `base_url` - Optional API base URL
-/// * `base64` - If `Some(true)`, returns base64-encoded string; otherwise raw bytes
-pub async fn fetch_ethscription_attachment(
-    client: &reqwest::Client,
-    id: &str,
-    base_url: Option<&str>,
-    base64: Option<bool>,
-    ungzip: Option<bool>,
-) -> Result<ContentData, ApiError> {
-    let encode_base64 = base64.unwrap_or(false);
-    let decode_gzip = ungzip.unwrap_or(false);
-    let base = base_url.unwrap_or(BASE_API_URL);
-    let url = format!("{base}/ethscriptions/{id}/attachment");
-
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| ApiError::upstream_error(format!("Failed to fetch attachment: {e}")))?;
-
-    if !resp.status().is_success() {
-        return Err(ApiError::not_found(
-            "Attachment not found for this ethscription.",
-        ));
-    }
-
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| ApiError::internal(format!("Failed to read attachment bytes: {e}")))?;
-
-    let bytes = if decode_gzip {
-        ungzip_bytes(&bytes).unwrap_or_else(|_| bytes.to_vec())
-    } else {
-        bytes.to_vec()
-    };
-
-    let data = if encode_base64 {
-        ContentData::Base64(bytes_to_base64(&bytes))
-    } else {
-        ContentData::Bytes(bytes)
-    };
-
-    Ok(data)
-}
-
-/// Check if an ethscription exists by SHA-256 hash.
-///
-/// Corresponds to `GET /ethscriptions/exists/0x{sha}`.
-pub async fn check_exists(
-    client: &reqwest::Client,
-    sha: &str,
-    base_url: Option<&str>,
-) -> Result<CheckExistResult, ApiError> {
-    let base = base_url.unwrap_or(BASE_API_URL);
-
-    // Validate SHA
-    let clean_sha = sha.strip_prefix("0x").unwrap_or(sha);
-    if is_valid_hash(clean_sha) == false {
-        return Err(ApiError::bad_request(
-            "Invalid SHA-256 hash, must be 64 hex characters long, or 66 if 0x-prefixed",
-        ));
-    }
-
-    let url = format!("{base}/ethscriptions/exists/0x{clean_sha}");
-    let cache_key = cache_key_from_parts(&[base, "exists", clean_sha]);
-    if let Some(cached) = load_json_cache::<CheckExistResult>("exists", &cache_key)? {
-        return Ok(cached);
-    }
-
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| ApiError::internal(format!("Failed to fetch from upstream API: {e}")))?;
-
-    if !resp.status().is_success() {
-        return Err(ApiError::bad_request(
-            "Failed checking if ethscription exists on the upstream API",
-        ));
-    }
-
-    let data: UpstreamExistsResponse = resp
-        .json()
-        .await
-        .map_err(|e| ApiError::internal(format!("Failed to parse exists response: {e}")))?;
-
-    if data.result.exists {
-        let ethscription = data
-            .result
-            .ethscription
-            .as_ref()
-            .map(normalize_ethscription);
-        let result = CheckExistResult {
-            exists: true,
-            ethscription,
-        };
-        store_json_cache("exists", &cache_key, CacheTtl::Week, &result)?;
-        Ok(result)
-    } else {
-        Ok(CheckExistResult {
-            exists: false,
-            ethscription: None,
-        })
-    }
-}
-
 /// Fetch transfers for an ethscription from raw upstream data.
 pub fn extract_transfers(raw: &RawEthscription) -> Vec<EthscriptionTransfer> {
     match &raw.ethscription_transfers {
         Some(transfers) => normalize_transfers(transfers),
         None => Vec::new(),
     }
-}
-
-pub async fn fetch_user_created_ethscriptions(
-    client: &reqwest::Client,
-    value: &str,
-    params: &HashMap<String, String>,
-    base_url: Option<&str>,
-) -> Result<EthscriptionListResult, ApiError> {
-    let mut params = params.clone();
-    params.insert("creator".to_string(), value.to_string());
-    if !is_valid_address(value) {
-        params.insert("resolve".to_string(), "true".to_string());
-    }
-    fetch_ethscriptions(client, &params, base_url).await
-}
-
-pub async fn fetch_user_owned_ethscriptions(
-    client: &reqwest::Client,
-    value: &str,
-    params: &HashMap<String, String>,
-    base_url: Option<&str>,
-) -> Result<EthscriptionListResult, ApiError> {
-    let mut params = params.clone();
-    params.insert("current".to_string(), value.to_string());
-    if !is_valid_address(value) {
-        params.insert("resolve".to_string(), "true".to_string());
-    }
-    fetch_ethscriptions(client, &params, base_url).await
-}
-
-pub async fn fetch_user_profile(
-    client: &reqwest::Client,
-    value: &str,
-    base_url: Option<&str>,
-) -> Result<UserProfileResult, ApiError> {
-    let mut params = HashMap::new();
-    params.insert("creator".to_string(), value.to_string());
-    params.insert(
-        "media_subtype".to_string(),
-        "vnd.esc.user.profile+json".to_string(),
-    );
-    params.insert("media_type".to_string(), "application".to_string());
-
-    if !is_valid_address(value) {
-        params.insert("resolve".to_string(), "true".to_string());
-    }
-
-    let ethscriptions = fetch_ethscriptions(client, &params, base_url).await?;
-    let Some((latest, previous)) = ethscriptions.result.split_first() else {
-        return Err(ApiError::not_found(format!(
-            "No user profile found for {value}"
-        )));
-    };
-
-    Ok(UserProfileResult {
-        latest: latest.clone(),
-        previous: previous.to_vec(),
-    })
-}
-
-pub async fn fetch_recent_pulse(
-    client: &reqwest::Client,
-    params: &HashMap<String, String>,
-    base_url: Option<&str>,
-) -> Result<RecentPulseResult, ApiError> {
-    let base = base_url.unwrap_or(BASE_API_URL);
-    let mut params = params.clone();
-    if params.remove("resolve").as_deref() == Some("true") {
-        resolve_address_patches(client, &mut params, base_url).await;
-    }
-
-    let query_string = build_qs(&normalize_filters(&params));
-    let url = if query_string.is_empty() {
-        format!("{base}/ethscription_transfers")
-    } else {
-        format!("{base}/ethscription_transfers?{query_string}")
-    };
-
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| ApiError::upstream_error(format!("Fetch failed unexpectedly: {e}")))?;
-
-    if !resp.status().is_success() {
-        return Err(ApiError::upstream_error(format!(
-            "Upstream returned status {}",
-            resp.status()
-        )));
-    }
-
-    let data: UpstreamPulseResponse = resp
-        .json()
-        .await
-        .map_err(|e| ApiError::internal(format!("Failed to parse upstream response: {e}")))?;
-
-    Ok(RecentPulseResult {
-        pagination: data.pagination,
-        result: data.result.iter().map(normalize_recent_pulse).collect(),
-    })
-}
-
-pub async fn get_digest_for_data(
-    client: &reqwest::Client,
-    data: &[u8],
-    check_existence: bool,
-    base_url: Option<&str>,
-) -> Result<DigestResult, ApiError> {
-    let (sha, hex, input) = compute_bytes_digest(data);
-    let mut result = DigestResult {
-        ethscription: None,
-        exists: None,
-        hex,
-        input,
-        sha: sha.clone(),
-    };
-
-    if check_existence {
-        let exists = check_exists(client, &sha, base_url).await?;
-        result.exists = Some(exists.exists);
-        result.ethscription = exists.ethscription;
-    }
-
-    Ok(result)
-}
-
-pub async fn estimate_data_cost(
-    client: &reqwest::Client,
-    data: &[u8],
-    speed: &str,
-    buffer_fee: u64,
-) -> Result<EstimateCostResult, ApiError> {
-    let gas_needed = estimate_gas(data, buffer_fee);
-    let prices = fetch_gas_prices(client, speed).await?;
-
-    let gas_price_gwei: f64 = prices.gas_price.parse().map_err(|e| {
-        ApiError::internal(format!(
-            "Failed to parse gas_price '{}': {e}",
-            prices.gas_price
-        ))
-    })?;
-    let eth_price: f64 = prices.eth_price.parse().map_err(|e| {
-        ApiError::internal(format!(
-            "Failed to parse eth_price '{}': {e}",
-            prices.eth_price
-        ))
-    })?;
-
-    let total_gas_wei = gas_price_gwei * 1_000_000_000.0;
-    let cost_wei = gas_needed as f64 * total_gas_wei;
-    let cost_eth = cost_wei / 1_000_000_000_000_000_000.0;
-    let cost_usd = cost_eth * eth_price;
-
-    Ok(EstimateCostResult {
-        prices,
-        cost: CostBreakdown {
-            wei: fmt_num(cost_wei),
-            eth: fmt_num(cost_eth),
-            usd: fmt_num(cost_usd),
-        },
-        meta: CostMeta {
-            gas_needed: gas_needed.to_string(),
-            input_length: data.len().to_string(),
-        },
-    })
-}
-
-/// Fetch gas prices from ethgastracker.com.
-pub async fn fetch_gas_prices(
-    client: &reqwest::Client,
-    speed: &str,
-) -> Result<PricesResult, ApiError> {
-    let url = "https://www.ethgastracker.com/api/gas/latest";
-
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| ApiError::internal(format!("Failed to fetch gas prices: {e}")))?;
-
-    if !resp.status().is_success() {
-        return Err(ApiError::upstream_error(format!(
-            "Failed to fetch gas prices: {}",
-            resp.status()
-        )));
-    }
-
-    let data: GasTrackerResponse = resp
-        .json()
-        .await
-        .map_err(|e| ApiError::internal(format!("Failed to parse gas tracker response: {e}")))?;
-
-    let oracle_speed = match speed {
-        "fast" => &data.data.oracle.fast,
-        _ => &data.data.oracle.normal,
-    };
-
-    Ok(PricesResult {
-        block_number: data.data.block_nr,
-        base_fee: fmt_num(data.data.base_fee),
-        next_fee: fmt_num(data.data.next_fee),
-        eth_price: fmt_num(data.data.eth_price),
-        gas_price: fmt_num(oracle_speed.gwei),
-        gas_fee: fmt_num(oracle_speed.gas_fee),
-        priority_fee: fmt_num(oracle_speed.priority_fee),
-    })
 }
 
 /// Build a query string from a `HashMap`, sorted by key for determinism.

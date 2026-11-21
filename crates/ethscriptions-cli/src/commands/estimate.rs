@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use clap::Args;
-use ethscriptions_sdk::fetcher;
+use ethscriptions_sdk::client::Client;
 
 use crate::input::require_input;
 use crate::output::print_json;
@@ -27,9 +27,10 @@ pub struct EstimateArgs {
     pub speed: String,
 }
 
-pub async fn run(client: &reqwest::Client, args: EstimateArgs, pretty: bool) -> Result<(), String> {
+pub async fn run(client: &Client, args: EstimateArgs, pretty: bool) -> Result<(), String> {
     let bytes = require_input(args.file.as_ref(), args.data.as_deref(), "estimate")?;
-    let output = fetcher::estimate_data_cost(client, &bytes, &args.speed, args.buffer_fee)
+    let output = client
+        .estimate_data_cost(&bytes, &args.speed, args.buffer_fee)
         .await
         .map_err(|e| e.to_string())?;
 

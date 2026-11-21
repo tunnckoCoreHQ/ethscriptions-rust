@@ -1,0 +1,60 @@
+$ eths --base-url http://127.0.0.1:PORT list
+exit: 0
+--- stdout
+{"pagination":{"has_more":true,"page_key":"next-key"},"result":[{"block_datetime":"2023-11-14T22:13:20.000Z","block_hash":"0xb10c","block_number":"19000000","block_timestamp":"1700000000","content_path":"/ethscriptions/0xabababababababababababababababababababababababababababababababab/content","content_sha":"0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","content_type":"text/plain","creator":"0x1111111111111111111111111111111111111111","ethscription_id":"0xabababababababababababababababababababababababababababababababab","gas_price":"10","gas_used":"100","has_transfers":true,"is_esip3":false,"is_esip4":false,"is_esip6":false,"is_esip8":false,"media_subtype":"plain","media_type":"text","receiver":"0x2222222222222222222222222222222222222222","transaction_fee":"1000","transaction_hash":"0xabababababababababababababababababababababababababababababababab","transaction_index":"7","transaction_value":"0"}]}
+
+--- stderr
+
+--- requests
+GET /ethscriptions
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT list --creator 0x1111111111111111111111111111111111111111 --media-type text --page-size 2 --reverse --only transaction_hash
+exit: 0
+--- stdout
+{"pagination":{"has_more":true,"page_key":"next-key"},"result":[{"transaction_hash":"0xabababababababababababababababababababababababababababababababab"}]}
+
+--- stderr
+
+--- requests
+GET /ethscriptions?creator=0x1111111111111111111111111111111111111111&max_results=2&media_type=text&reverse=true
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT list
+exit: 1
+--- stdout
+
+--- stderr
+Error: Upstream error: Upstream returned status 500 Internal Server Error
+
+--- requests
+GET /ethscriptions
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT list
+exit: 1
+--- stdout
+
+--- stderr
+Error: Internal error: Failed to parse upstream response: error decoding response body
+
+--- requests
+GET /ethscriptions
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT list
+exit: 1
+--- stdout
+
+--- stderr
+Error: Upstream error: Fetch failed unexpectedly: error sending request for url (http://127.0.0.1:PORT/ethscriptions)
+
+--- requests
+
+--- files
+
+

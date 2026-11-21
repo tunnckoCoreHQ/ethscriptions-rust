@@ -1,0 +1,61 @@
+$ eths --base-url http://127.0.0.1:PORT profile 0x1111111111111111111111111111111111111111
+exit: 0
+--- stdout
+{"latest":{"block_datetime":"2023-11-14T22:13:20.000Z","block_hash":"0xb10c","block_number":"19000000","block_timestamp":"1700000000","content_path":"/ethscriptions/0xabababababababababababababababababababababababababababababababab/content","content_sha":"0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","content_type":"text/plain","content_uri":"http://127.0.0.1:PORT/profile.json","creator":"0x1111111111111111111111111111111111111111","ethscription_id":"0xabababababababababababababababababababababababababababababababab","gas_price":"10","gas_used":"100","has_transfers":true,"is_esip3":false,"is_esip4":false,"is_esip6":false,"is_esip8":false,"media_subtype":"plain","media_type":"text","receiver":"0x2222222222222222222222222222222222222222","transaction_fee":"1000","transaction_hash":"0xabababababababababababababababababababababababababababababababab","transaction_index":"7","transaction_value":"0"},"previous":[]}
+
+--- stderr
+
+--- requests
+GET /ethscriptions?creator=0x1111111111111111111111111111111111111111&media_type=application&mime_subtype=vnd.esc.user.profile%2Bjson
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT profile --info 0x1111111111111111111111111111111111111111
+exit: 0
+--- stdout
+{"bio":"hi","name":"tester"}
+
+--- stderr
+
+--- requests
+GET /ethscriptions?creator=0x1111111111111111111111111111111111111111&media_type=application&mime_subtype=vnd.esc.user.profile%2Bjson
+GET /profile.json
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT profile --created 0x1111111111111111111111111111111111111111 --page-size 3
+exit: 0
+--- stdout
+{"pagination":{"has_more":true,"page_key":"next-key"},"result":[{"block_datetime":"2023-11-14T22:13:20.000Z","block_hash":"0xb10c","block_number":"19000000","block_timestamp":"1700000000","content_path":"/ethscriptions/0xabababababababababababababababababababababababababababababababab/content","content_sha":"0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","content_type":"text/plain","creator":"0x1111111111111111111111111111111111111111","ethscription_id":"0xabababababababababababababababababababababababababababababababab","gas_price":"10","gas_used":"100","has_transfers":true,"is_esip3":false,"is_esip4":false,"is_esip6":false,"is_esip8":false,"media_subtype":"plain","media_type":"text","receiver":"0x2222222222222222222222222222222222222222","transaction_fee":"1000","transaction_hash":"0xabababababababababababababababababababababababababababababababab","transaction_index":"7","transaction_value":"0"}]}
+
+--- stderr
+
+--- requests
+GET /ethscriptions?creator=0x1111111111111111111111111111111111111111&max_results=3
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT profile --owned 0x1111111111111111111111111111111111111111
+exit: 0
+--- stdout
+{"pagination":{"has_more":true,"page_key":"next-key"},"result":[{"block_datetime":"2023-11-14T22:13:20.000Z","block_hash":"0xb10c","block_number":"19000000","block_timestamp":"1700000000","content_path":"/ethscriptions/0xabababababababababababababababababababababababababababababababab/content","content_sha":"0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","content_type":"text/plain","creator":"0x1111111111111111111111111111111111111111","ethscription_id":"0xabababababababababababababababababababababababababababababababab","gas_price":"10","gas_used":"100","has_transfers":true,"is_esip3":false,"is_esip4":false,"is_esip6":false,"is_esip8":false,"media_subtype":"plain","media_type":"text","receiver":"0x2222222222222222222222222222222222222222","transaction_fee":"1000","transaction_hash":"0xabababababababababababababababababababababababababababababababab","transaction_index":"7","transaction_value":"0"}]}
+
+--- stderr
+
+--- requests
+GET /ethscriptions?current_owner=0x1111111111111111111111111111111111111111
+--- files
+
+
+$ eths --base-url http://127.0.0.1:PORT profile 0x1111111111111111111111111111111111111111
+exit: 1
+--- stdout
+
+--- stderr
+Error: Not found: No user profile found for 0x1111111111111111111111111111111111111111
+
+--- requests
+GET /ethscriptions?creator=0x1111111111111111111111111111111111111111&media_type=application&mime_subtype=vnd.esc.user.profile%2Bjson
+--- files
+
+

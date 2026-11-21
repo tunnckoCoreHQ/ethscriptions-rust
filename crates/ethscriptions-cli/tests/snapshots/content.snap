@@ -1,0 +1,83 @@
+$ eths --base-url http://127.0.0.1:PORT content 0xabababababababababababababababababababababababababababababababab
+exit: 0
+--- stdout
+�PNG-bytes
+--- stderr
+
+--- requests
+GET /ethscriptions/0xabababababababababababababababababababababababababababababababab
+GET /blob/one
+--- files
+cache/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+
+$ eths --base-url http://127.0.0.1:PORT content --base64 0xabababababababababababababababababababababababababababababababab
+exit: 0
+--- stdout
+iVBORy1ieXRlcw==
+
+--- stderr
+
+--- requests
+GET /blob/one
+--- files
+cache/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+
+$ eths --base-url http://127.0.0.1:PORT content 0xabababababababababababababababababababababababababababababababab
+exit: 1
+--- stdout
+
+--- stderr
+Error: Upstream error: Failed to fetch content: upstream returned status 404 Not Found
+
+--- requests
+GET /blob/one
+--- files
+cache/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+
+$ eths --base-url http://127.0.0.1:PORT attachment 0xabababababababababababababababababababababababababababababababab
+exit: 0
+--- stdout
+attached
+--- stderr
+
+--- requests
+GET /ethscriptions/0xabababababababababababababababababababababababababababababababab/attachment
+--- files
+cache/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+
+$ eths --base-url http://127.0.0.1:PORT attachment --base64 0xabababababababababababababababababababababababababababababababab
+exit: 0
+--- stdout
+YXR0YWNoZWQ=
+
+--- stderr
+
+--- requests
+GET /ethscriptions/0xabababababababababababababababababababababababababababababababab/attachment
+--- files
+cache/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+
+$ eths --base-url http://127.0.0.1:PORT attachment 0xabababababababababababababababababababababababababababababababab
+exit: 1
+--- stdout
+
+--- stderr
+Error: Not found: Attachment not found for this ethscription.
+
+--- requests
+GET /ethscriptions/0xabababababababababababababababababababababababababababababababab/attachment
+--- files
+cache/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+
+$ eths --base-url http://127.0.0.1:PORT attachment 0xabababababababababababababababababababababababababababababababab
+exit: 1
+--- stdout
+
+--- stderr
+Error: Upstream error: Failed to fetch attachment: error sending request for url (http://127.0.0.1:PORT/ethscriptions/0xabababababababababababababababababababababababababababababababab/attachment)
+
+--- requests
+
+--- files
+cache/ethscription/sha256(http://127.0.0.1:PORT|ethscription|0xabababababababababababababababababababababababababababababababab).json
+
