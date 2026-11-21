@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use std::collections::HashMap;
-
 use crate::cache::CacheTtl;
 use crate::client::{Client, Failure};
 use crate::digest::{compute_bytes_digest, estimate_gas};
 use crate::encode::{parse_data_uri, ungzip_bytes};
 use crate::error::ApiError;
-use crate::filters::normalize_filters;
 use crate::normalize::normalize_ethscription;
+use crate::query::{ListQuery, PulseQuery};
 use crate::types::{
     CheckExistResult, CostBreakdown, CostMeta, DigestResult, EstimateCostResult, Ethscription,
     EthscriptionListResult, GasTrackerResponse, PricesResult, RawEthscription, RawRecentPulseEvent,
@@ -16,7 +14,6 @@ use crate::types::{
     UpstreamPulseResponse, UpstreamSingleResponse, UserProfileResult,
 };
 use crate::validate::{is_valid_address, is_valid_hash};
-use url::form_urlencoded::Serializer;
 
 /// Format an f64 as a clean string: no trailing zeros, no scientific notation.
 ///
@@ -48,20 +45,15 @@ fn list_error(failure: Failure) -> ApiError {
 impl Client {
     /// Fetch a list of ethscriptions with optional filters.
     ///
-    /// Corresponds to `GET /ethscriptions?{params}`.
+    /// Corresponds to `GET /ethscriptions?{query}`.
     pub async fn fetch_ethscriptions(
         &self,
-        params: &HashMap<String, String>,
+        mut query: ListQuery,
     ) -> Result<EthscriptionListResult, ApiError> {
         let base = &self.api_url;
 
-        let mut params = params.clone();
-        if params.remove("resolve").as_deref() == Some("true") {
-            self.resolve_address_patches(&mut params).await;
-        }
-
-        let normalized = normalize_filters(&params);
-        let query_string = build_qs(&normalized);
+        query.resolve_names(self).await;
+        let query_string = query.to_query_string();
         let url = if query_string.is_empty() {
             format!("{base}/ethscriptions")
         } else {
@@ -81,11 +73,10 @@ impl Client {
     /// Convenience wrapper around `fetch_ethscriptions` with `attachment_present=true`.
     pub async fn fetch_blobscriptions(
         &self,
-        params: &HashMap<String, String>,
+        mut query: ListQuery,
     ) -> Result<EthscriptionListResult, ApiError> {
-        let mut params = params.clone();
-        params.insert("attachment_present".to_string(), "true".to_string());
-        self.fetch_ethscriptions(&params).await
+        query.attachment_present = true;
+        self.fetch_ethscriptions(query).await
     }
 
     /// Fetch a single ethscription by ID.
@@ -270,43 +261,33 @@ impl Client {
     pub async fn fetch_user_created_ethscriptions(
         &self,
         value: &str,
-        params: &HashMap<String, String>,
+        mut query: ListQuery,
     ) -> Result<EthscriptionListResult, ApiError> {
-        let mut params = params.clone();
-        params.insert("creator".to_string(), value.to_string());
-        if !is_valid_address(value) {
-            params.insert("resolve".to_string(), "true".to_string());
-        }
-        self.fetch_ethscriptions(&params).await
+        query.creator = Some(value.to_string());
+        query.resolve |= !is_valid_address(value);
+        self.fetch_ethscriptions(query).await
     }
 
     pub async fn fetch_user_owned_ethscriptions(
         &self,
         value: &str,
-        params: &HashMap<String, String>,
+        mut query: ListQuery,
     ) -> Result<EthscriptionListResult, ApiError> {
-        let mut params = params.clone();
-        params.insert("current".to_string(), value.to_string());
-        if !is_valid_address(value) {
-            params.insert("resolve".to_string(), "true".to_string());
-        }
-        self.fetch_ethscriptions(&params).await
+        query.current_owner = Some(value.to_string());
+        query.resolve |= !is_valid_address(value);
+        self.fetch_ethscriptions(query).await
     }
 
     pub async fn fetch_user_profile(&self, value: &str) -> Result<UserProfileResult, ApiError> {
-        let mut params = HashMap::new();
-        params.insert("creator".to_string(), value.to_string());
-        params.insert(
-            "media_subtype".to_string(),
-            "vnd.esc.user.profile+json".to_string(),
-        );
-        params.insert("media_type".to_string(), "application".to_string());
+        let query = ListQuery {
+            creator: Some(value.to_string()),
+            media_subtype: Some("vnd.esc.user.profile+json".to_string()),
+            media_type: Some("application".to_string()),
+            resolve: !is_valid_address(value),
+            ..ListQuery::default()
+        };
 
-        if !is_valid_address(value) {
-            params.insert("resolve".to_string(), "true".to_string());
-        }
-
-        let mut records = self.fetch_ethscriptions(&params).await?.records.into_iter();
+        let mut records = self.fetch_ethscriptions(query).await?.records.into_iter();
         let Some(latest) = records.next() else {
             return Err(ApiError::not_found(format!(
                 "No user profile found for {value}"
@@ -321,15 +302,11 @@ impl Client {
 
     pub async fn fetch_recent_pulse(
         &self,
-        params: &HashMap<String, String>,
+        mut query: PulseQuery,
     ) -> Result<RecentPulseResult, ApiError> {
         let base = &self.api_url;
-        let mut params = params.clone();
-        if params.remove("resolve").as_deref() == Some("true") {
-            self.resolve_address_patches(&mut params).await;
-        }
-
-        let query_string = build_qs(&normalize_filters(&params));
+        query.resolve_names(self).await;
+        let query_string = query.to_query_string();
         let url = if query_string.is_empty() {
             format!("{base}/ethscription_transfers")
         } else {
@@ -473,23 +450,6 @@ impl ContentData {
             ContentData::Base64(s) => s.clone(),
         }
     }
-}
-
-/// Build a query string from a `HashMap`, sorted by key for determinism.
-fn build_qs(params: &HashMap<String, String>) -> String {
-    let mut pairs: Vec<(&str, &str)> = params
-        .iter()
-        .filter(|(_, v)| !v.is_empty())
-        .map(|(key, value)| (key.as_str(), value.as_str()))
-        .collect();
-    pairs.sort();
-
-    let mut serializer = Serializer::new(String::new());
-    for (key, value) in pairs {
-        serializer.append_pair(key, value);
-    }
-
-    serializer.finish()
 }
 
 fn pulse_value_to_string(v: &serde_json::Value) -> String {
@@ -724,66 +684,5 @@ mod tests {
         let data = ContentData::Bytes(vec![]);
         assert_eq!(data.as_bytes(), b"");
         assert_eq!(data.as_base64(), "");
-    }
-
-    // -----------------------------------------------------------------------
-    // build_qs
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_build_qs_basic() {
-        let mut params = HashMap::new();
-        params.insert("creator".to_string(), "0xabc".to_string());
-        params.insert("media_type".to_string(), "text".to_string());
-        let qs = build_qs(&params);
-        assert_eq!(qs, "creator=0xabc&media_type=text");
-    }
-
-    #[test]
-    fn test_build_qs_sorted() {
-        let mut params = HashMap::new();
-        params.insert("z_param".to_string(), "last".to_string());
-        params.insert("a_param".to_string(), "first".to_string());
-        let qs = build_qs(&params);
-        assert_eq!(qs, "a_param=first&z_param=last");
-    }
-
-    #[test]
-    fn test_build_qs_filters_empty_values() {
-        let mut params = HashMap::new();
-        params.insert("creator".to_string(), "0xabc".to_string());
-        params.insert("empty".to_string(), String::new());
-        let qs = build_qs(&params);
-        assert_eq!(qs, "creator=0xabc");
-    }
-
-    #[test]
-    fn test_build_qs_empty_map() {
-        let params = HashMap::new();
-        let qs = build_qs(&params);
-        assert_eq!(qs, "");
-    }
-
-    #[test]
-    fn test_build_qs_single_param() {
-        let mut params = HashMap::new();
-        params.insert("per_page".to_string(), "25".to_string());
-        let qs = build_qs(&params);
-        assert_eq!(qs, "per_page=25");
-    }
-
-    #[test]
-    fn test_build_qs_url_encodes_values() {
-        let mut params = HashMap::new();
-        params.insert("name".to_string(), "wgw test".to_string());
-        params.insert(
-            "content_type".to_string(),
-            "text/plain;charset=utf-8".to_string(),
-        );
-        let qs = build_qs(&params);
-        assert_eq!(
-            qs,
-            "content_type=text%2Fplain%3Bcharset%3Dutf-8&name=wgw+test"
-        );
     }
 }

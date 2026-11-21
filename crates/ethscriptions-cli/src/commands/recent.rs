@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use std::collections::HashMap;
-
 use clap::Args;
 use ethscriptions_sdk::client::Client;
+use ethscriptions_sdk::query::PulseQuery;
 
 use crate::output::print_json;
 
@@ -51,44 +50,23 @@ pub struct RecentArgs {
     pub page_key: Option<String>,
 }
 
-fn insert_str(params: &mut HashMap<String, String>, key: &str, val: &Option<String>) {
-    if let Some(v) = val {
-        params.insert(key.to_string(), v.clone());
-    }
-}
-
-fn insert_bool(params: &mut HashMap<String, String>, key: &str, val: bool) {
-    if val {
-        params.insert(key.to_string(), "true".to_string());
-    }
-}
-
-fn insert_u32(params: &mut HashMap<String, String>, key: &str, val: Option<u32>) {
-    if let Some(v) = val {
-        params.insert(key.to_string(), v.to_string());
-    }
-}
-
 pub async fn run(client: &Client, args: RecentArgs, pretty: bool) -> Result<(), String> {
-    let mut params = HashMap::new();
-    insert_str(&mut params, "from_address", &args.from_address);
-    insert_str(&mut params, "to_address", &args.to_address);
-    insert_str(&mut params, "to_or_from", &args.to_or_from);
-    insert_str(&mut params, "transaction_hash", &args.transaction_hash);
-    insert_str(&mut params, "ethscription_token_tick", &args.token_tick);
-    insert_str(
-        &mut params,
-        "ethscription_token_protocol",
-        &args.token_protocol,
-    );
-    insert_str(&mut params, "sort_by", &args.sort_by);
-    insert_bool(&mut params, "reverse", args.reverse);
-    insert_u32(&mut params, "page_size", args.page_size);
-    insert_str(&mut params, "page_key", &args.page_key);
-    insert_bool(&mut params, "resolve", true);
+    let query = PulseQuery {
+        from_address: args.from_address,
+        to_address: args.to_address,
+        to_or_from: args.to_or_from,
+        transaction_hash: args.transaction_hash,
+        token_tick: args.token_tick,
+        token_protocol: args.token_protocol,
+        sort_by: args.sort_by,
+        reverse: args.reverse,
+        page_size: args.page_size,
+        page_key: args.page_key,
+        resolve: true,
+    };
 
     let result = client
-        .fetch_recent_pulse(&params)
+        .fetch_recent_pulse(query)
         .await
         .map_err(|e| e.to_string())?;
 
