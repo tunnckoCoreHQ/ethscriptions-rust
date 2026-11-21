@@ -5,7 +5,7 @@ use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 
 use crate::cache::Cache;
-use crate::constants::{BASE_API_URL, ENS_API_URL, GAS_API_URL, RPC_URL};
+use crate::constants::{BASE_API_URL, ENS_API_URL, GAS_API_URL};
 
 /// Client for the upstream APIs: the HTTP client, the base URLs, and the cache.
 #[derive(Debug, Clone)]
@@ -17,8 +17,6 @@ pub struct Client {
     pub ens_url: String,
     /// Gas prices API URL.
     pub gas_url: String,
-    /// Default Ethereum JSON-RPC URL, used when no RPC URL is configured.
-    pub rpc_url: String,
     pub cache: Cache,
 }
 
@@ -36,7 +34,6 @@ impl Client {
             api_url: api_url.unwrap_or(BASE_API_URL).to_string(),
             ens_url: ENS_API_URL.to_string(),
             gas_url: GAS_API_URL.to_string(),
-            rpc_url: RPC_URL.to_string(),
             cache: Cache::default(),
         }
     }
