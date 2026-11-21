@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use clap::Args;
 use ethscriptions_sdk::client::Client;
 
-use crate::input::require_input;
-use crate::output::print_json;
+use crate::input::Stdin;
+use crate::output::{Error, Output};
 
 #[derive(Args)]
 #[command(next_display_order = None)]
@@ -27,13 +27,18 @@ pub struct EstimateArgs {
     pub speed: String,
 }
 
-pub async fn run(client: &Client, args: EstimateArgs, pretty: bool) -> Result<(), String> {
-    let bytes = require_input(args.file.as_ref(), args.data.as_deref(), "estimate")?;
+pub async fn run(
+    client: &Client,
+    args: EstimateArgs,
+    stdin: &mut Stdin,
+    pretty: bool,
+) -> Result<Output, Error> {
+    let bytes = stdin
+        .require_input(args.file.as_ref(), args.data.as_deref(), "estimate")?
+        .bytes;
     let output = client
         .estimate_data_cost(&bytes, &args.speed, args.buffer_fee)
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
 
-    print_json(&output, pretty);
-    Ok(())
+    Ok(Output::json(&output, pretty))
 }
