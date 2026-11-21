@@ -14,46 +14,10 @@ use alloy_signer_local::{MnemonicBuilder, PrivateKeySigner, coins_bip39::English
 use serde::Serialize;
 
 use crate::client::Client;
-use crate::digest::compute_digest;
-use crate::encode::{
-    DataUriOptions, InputSource, build_data_uri_with_type, detect_content_type, gzip_bytes,
-    optimize_image,
-};
+use crate::encode::{InputSource, prepare_payload};
+pub use crate::encode::{PrepareInscribeOptions, PreparedInscribe};
 use crate::error::ApiError;
 use crate::types::EstimateCostResult;
-
-#[derive(Debug, Clone, Serialize)]
-pub struct PrepareInscribeOptions {
-    pub source: InputSource,
-    pub optimize: bool,
-    pub gzip: bool,
-    pub esip6: bool,
-    pub skip_content_type: bool,
-    pub data_uri_limit: usize,
-}
-
-impl Default for PrepareInscribeOptions {
-    fn default() -> Self {
-        Self {
-            source: InputSource::Literal,
-            optimize: false,
-            gzip: false,
-            esip6: false,
-            skip_content_type: false,
-            data_uri_limit: 500,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct PreparedInscribe {
-    pub content_type: String,
-    pub data_uri: String,
-    pub data_uri_truncated: String,
-    pub gzipped_size: Option<usize>,
-    pub sha: String,
-    pub size: usize,
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DryRunInscribeResult {
@@ -110,48 +74,11 @@ pub async fn prepare_inscribe(
     bytes: &[u8],
     options: &PrepareInscribeOptions,
 ) -> Result<(PreparedInscribe, EstimateCostResult), ApiError> {
-    let mut content_type = detect_content_type(bytes);
-    let mut transformed = bytes.to_vec();
-    let original_size = transformed.len();
-
-    if options.optimize
-        && let Some(optimized) = optimize_image(&transformed, &content_type)?
-    {
-        transformed = optimized;
-        content_type = "image/webp".to_string();
-    }
-
-    let gzipped_size = if options.gzip && options.source != InputSource::Literal {
-        transformed = gzip_bytes(&transformed)?;
-        Some(transformed.len())
-    } else {
-        None
-    };
-
-    let data_uri = build_data_uri_with_type(
-        &transformed,
-        &content_type,
-        &DataUriOptions {
-            skip_content_type: options.skip_content_type,
-            esip6: options.esip6,
-        },
-    );
-    let sha = compute_digest(data_uri.as_bytes());
+    let prepared = prepare_payload(bytes, options)?;
     let estimate = client
-        .estimate_data_cost(data_uri.as_bytes(), "fast", 0)
+        .estimate_data_cost(prepared.data_uri.as_bytes(), "fast", 0)
         .await?;
-
-    Ok((
-        PreparedInscribe {
-            content_type,
-            data_uri_truncated: truncate_data_uri(&data_uri, options.data_uri_limit),
-            data_uri,
-            gzipped_size,
-            sha,
-            size: original_size,
-        },
-        estimate,
-    ))
+    Ok((prepared, estimate))
 }
 
 pub async fn inscribe(
@@ -360,16 +287,6 @@ fn build_blob_sidecar(data: &[u8]) -> Result<BlobTransactionSidecar, ApiError> {
     SidecarBuilder::<SimpleCoder>::from_slice(data)
         .build_4844()
         .map_err(|e| ApiError::internal(format!("Failed to build blob sidecar: {e}")))
-}
-
-fn truncate_data_uri(data_uri: &str, limit: usize) -> String {
-    let mut chars = data_uri.chars();
-    let truncated: String = chars.by_ref().take(limit).collect();
-    if chars.next().is_some() {
-        format!("{truncated}...")
-    } else {
-        truncated
-    }
 }
 
 fn read_env_file(path: impl AsRef<Path>) -> Result<HashMap<String, String>, ApiError> {

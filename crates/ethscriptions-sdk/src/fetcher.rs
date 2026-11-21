@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::cache::CacheTtl;
 use crate::client::{Client, Failure};
 use crate::digest::{compute_bytes_digest, estimate_gas};
-use crate::encode::ungzip_bytes;
+use crate::encode::{parse_data_uri, ungzip_bytes};
 use crate::error::ApiError;
 use crate::filters::normalize_filters;
 use crate::normalize::{
@@ -527,70 +527,6 @@ impl ContentData {
     }
 }
 
-/// Parse a `data:` URI into raw bytes and content type.
-///
-/// Supports `data:[<mediatype>][;base64],<data>` format.
-fn parse_data_uri(uri: &str) -> Result<(Vec<u8>, String), ApiError> {
-    let rest = uri
-        .strip_prefix("data:")
-        .ok_or_else(|| ApiError::internal("Invalid data URI"))?;
-
-    let (meta, data) = rest
-        .split_once(',')
-        .ok_or_else(|| ApiError::internal("Invalid data URI: missing comma"))?;
-
-    let is_base64 = meta.ends_with(";base64");
-    let content_type = if is_base64 {
-        meta.strip_suffix(";base64").unwrap_or(meta)
-    } else {
-        meta
-    };
-    let content_type = if content_type.is_empty() {
-        "text/plain;charset=US-ASCII"
-    } else {
-        content_type
-    };
-
-    let bytes = if is_base64 {
-        use base64::Engine;
-        base64::engine::general_purpose::STANDARD
-            .decode(data)
-            .map_err(|e| ApiError::internal(format!("Failed to decode base64 data URI: {e}")))?
-    } else {
-        percent_decode(data)?
-    };
-
-    Ok((bytes, content_type.to_string()))
-}
-
-fn percent_decode(input: &str) -> Result<Vec<u8>, ApiError> {
-    let bytes = input.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-
-    while index < bytes.len() {
-        if bytes[index] == b'%' {
-            if index + 2 >= bytes.len() {
-                return Err(ApiError::internal(
-                    "Invalid percent-encoding in data URI payload",
-                ));
-            }
-
-            let hex = &input[index + 1..index + 3];
-            let value = u8::from_str_radix(hex, 16)
-                .map_err(|_| ApiError::internal("Invalid percent-encoding in data URI payload"))?;
-            decoded.push(value);
-            index += 3;
-            continue;
-        }
-
-        decoded.push(bytes[index]);
-        index += 1;
-    }
-
-    Ok(decoded)
-}
-
 /// Fetch transfers for an ethscription from raw upstream data.
 pub fn extract_transfers(raw: &RawEthscription) -> Vec<EthscriptionTransfer> {
     match &raw.ethscription_transfers {
@@ -675,96 +611,6 @@ fn cache_key_from_parts(parts: &[&str]) -> String {
 mod tests {
     use super::*;
     use crate::types::{RawEthscription, RawTransfer};
-
-    // -----------------------------------------------------------------------
-    // parse_data_uri
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_parse_data_uri_plain_text() {
-        let (bytes, ct) = parse_data_uri("data:,hello").unwrap();
-        assert_eq!(bytes, b"hello");
-        // empty mediatype defaults to text/plain;charset=US-ASCII
-        assert_eq!(ct, "text/plain;charset=US-ASCII");
-    }
-
-    #[test]
-    fn test_parse_data_uri_with_mediatype() {
-        let (bytes, ct) = parse_data_uri("data:text/plain,hello world").unwrap();
-        assert_eq!(bytes, b"hello world");
-        assert_eq!(ct, "text/plain");
-    }
-
-    #[test]
-    fn test_parse_data_uri_base64() {
-        // "Hello" in base64 is "SGVsbG8="
-        let (bytes, ct) = parse_data_uri("data:text/plain;base64,SGVsbG8=").unwrap();
-        assert_eq!(bytes, b"Hello");
-        assert_eq!(ct, "text/plain");
-    }
-
-    #[test]
-    fn test_parse_data_uri_base64_no_mediatype() {
-        // ;base64 with empty mediatype
-        let (bytes, ct) = parse_data_uri("data:;base64,SGVsbG8=").unwrap();
-        assert_eq!(bytes, b"Hello");
-        assert_eq!(ct, "text/plain;charset=US-ASCII");
-    }
-
-    #[test]
-    fn test_parse_data_uri_image_base64() {
-        // Valid base64 for a few bytes (PNG magic bytes: 0x89 0x50 0x4E 0x47)
-        let (bytes, ct) = parse_data_uri("data:image/png;base64,iVBORw==").unwrap();
-        assert_eq!(ct, "image/png");
-        assert_eq!(bytes.is_empty(), false);
-        assert_eq!(bytes[0], 0x89); // PNG magic byte
-    }
-
-    #[test]
-    fn test_parse_data_uri_json() {
-        let (bytes, ct) = parse_data_uri("data:application/json,{\"key\":\"value\"}").unwrap();
-        assert_eq!(ct, "application/json");
-        assert_eq!(std::str::from_utf8(&bytes).unwrap(), "{\"key\":\"value\"}");
-    }
-
-    #[test]
-    fn test_parse_data_uri_empty_data() {
-        let (bytes, ct) = parse_data_uri("data:text/plain,").unwrap();
-        assert_eq!(bytes, b"");
-        assert_eq!(ct, "text/plain");
-    }
-
-    #[test]
-    fn test_parse_data_uri_with_charset_param() {
-        let (bytes, ct) = parse_data_uri("data:text/plain;charset=utf-8,hello").unwrap();
-        assert_eq!(bytes, b"hello");
-        assert_eq!(ct, "text/plain;charset=utf-8");
-    }
-
-    #[test]
-    fn test_parse_data_uri_percent_decodes_payload() {
-        let (bytes, ct) = parse_data_uri("data:text/plain,hello%20world%21").unwrap();
-        assert_eq!(bytes, b"hello world!");
-        assert_eq!(ct, "text/plain");
-    }
-
-    #[test]
-    fn test_parse_data_uri_missing_comma() {
-        let result = parse_data_uri("data:text/plain");
-        assert_eq!(result.is_err(), true);
-    }
-
-    #[test]
-    fn test_parse_data_uri_no_prefix() {
-        let result = parse_data_uri("http://example.com");
-        assert_eq!(result.is_err(), true);
-    }
-
-    #[test]
-    fn test_parse_data_uri_invalid_base64() {
-        let result = parse_data_uri("data:text/plain;base64,!!!invalid!!!");
-        assert_eq!(result.is_err(), true);
-    }
 
     // -----------------------------------------------------------------------
     // extract_transfers
