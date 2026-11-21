@@ -148,8 +148,8 @@ async fn fetch_ethscriptions_builds_query_and_maps_errors() {
         .fetch_ethscriptions(&params(&[("creator", ADDR), ("media_type", "text")]))
         .await
         .unwrap();
-    assert_eq!(list.result.len(), 1);
-    assert_eq!(list.result[0].transaction_hash, HASH);
+    assert_eq!(list.records.len(), 1);
+    assert_eq!(list.records[0].normalized.transaction_hash, HASH);
     assert_eq!(list.pagination.unwrap().page_key.as_deref(), Some("k"));
     assert_eq!(
         stub.take_requests(),
@@ -207,16 +207,19 @@ async fn fetch_ethscriptions_resolves_names_through_ens() {
 }
 
 #[tokio::test]
-async fn fetch_ethscription_uses_cache_and_owners_mode_skips_it() {
+async fn fetch_ethscription_uses_cache_and_uncached_skips_it() {
     let stub = Stub::start();
     let client = client(&stub);
     let path = format!("/ethscriptions/{HASH}");
     stub.json(&path, 200, &single());
 
-    let (first, _) = client.fetch_ethscription(HASH).await.unwrap();
+    let first = client.fetch_ethscription(HASH).await.unwrap();
     stub.json(&path, 500, "{}");
-    let (second, _) = client.fetch_ethscription(HASH).await.unwrap();
-    assert_eq!(first.transaction_hash, second.transaction_hash);
+    let second = client.fetch_ethscription(HASH).await.unwrap();
+    assert_eq!(
+        first.normalized.transaction_hash,
+        second.normalized.transaction_hash
+    );
     assert_eq!(stub.take_requests(), std::slice::from_ref(&path));
 
     let root = client.cache.root.clone().unwrap();
@@ -228,7 +231,7 @@ async fn fetch_ethscription_uses_cache_and_owners_mode_skips_it() {
     );
 
     let err = client
-        .fetch_ethscription_mode(HASH, Some("owners"))
+        .fetch_ethscription_uncached(HASH)
         .await
         .err()
         .unwrap();

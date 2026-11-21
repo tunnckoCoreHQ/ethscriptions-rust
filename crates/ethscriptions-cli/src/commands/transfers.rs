@@ -2,7 +2,6 @@
 
 use clap::Args;
 use ethscriptions_sdk::client::Client;
-use ethscriptions_sdk::fetcher;
 use ethscriptions_sdk::validate::parse_ethscription_id;
 
 use crate::input::require_text_arg;
@@ -20,12 +19,12 @@ pub async fn run(client: &Client, args: TransfersArgs, pretty: bool) -> Result<(
     let id =
         parse_ethscription_id(&raw).ok_or_else(|| format!("Invalid ethscription ID: '{raw}'"))?;
 
-    let (_ethscription, raw_eth) = client
+    let record = client
         .fetch_ethscription(&id)
         .await
         .map_err(|e| e.to_string())?;
 
-    let transfers = fetcher::extract_transfers(&raw_eth);
+    let transfers = record.transfers();
     print_json(&transfers, pretty);
     Ok(())
 }

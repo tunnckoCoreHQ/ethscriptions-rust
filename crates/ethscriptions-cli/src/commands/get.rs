@@ -2,11 +2,11 @@
 
 use clap::Args;
 use ethscriptions_sdk::client::Client;
-use ethscriptions_sdk::normalize::apply_field_selection;
+use ethscriptions_sdk::types::FieldSelection;
 use ethscriptions_sdk::validate::parse_ethscription_id;
 
 use crate::input::require_text_arg;
-use crate::output::{print_bytes, print_json};
+use crate::output::print_json;
 
 #[derive(Args)]
 #[command(next_display_order = None)]
@@ -40,41 +40,29 @@ pub async fn run(client: &Client, args: GetArgs, pretty: bool) -> Result<(), Str
     let id =
         parse_ethscription_id(&raw).ok_or_else(|| format!("Invalid ethscription ID: '{raw}'"))?;
 
-    let mode = if args.owners {
-        Some("owners")
-    } else if args.numbers {
-        Some("numbers")
-    } else {
-        None
-    };
-
-    if mode.is_none() {
-        let (ethscription, raw_eth) = client
-            .fetch_ethscription(&id)
+    if args.owners {
+        let record = client
+            .fetch_ethscription_uncached(&id)
             .await
             .map_err(|e| e.to_string())?;
-        let selected = apply_field_selection(
-            &ethscription,
-            &raw_eth,
+        print_json(&record.owners(), pretty);
+        return Ok(());
+    }
+
+    let record = client
+        .fetch_ethscription(&id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if args.numbers {
+        print_json(&record.numbers(), pretty);
+    } else {
+        let selection = FieldSelection::new(
             args.with_fields.as_deref(),
             args.only.as_deref(),
-            Some(args.latest_transfer),
+            args.latest_transfer,
         );
-        print_json(&selected, pretty);
-    } else {
-        let response = client
-            .fetch_ethscription_mode(&id, mode)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        match response {
-            ethscriptions_sdk::types::ModeResponse::Binary(bytes, _) => {
-                print_bytes(&bytes);
-            }
-            ethscriptions_sdk::types::ModeResponse::Json(json) => {
-                print_json(&json, pretty);
-            }
-        }
+        print_json(&record.select(&selection), pretty);
     }
 
     Ok(())

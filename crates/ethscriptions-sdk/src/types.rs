@@ -161,10 +161,17 @@ pub struct EthscriptionTransfer {
 // Result types returned by public SDK functions
 // ---------------------------------------------------------------------------
 
-/// Response for mode-based fetching (JSON or raw binary).
-pub enum ModeResponse {
-    Json(serde_json::Value),
-    Binary(Vec<u8>, String),
+#[derive(Debug, Clone)]
+pub struct Record {
+    pub normalized: Ethscription,
+    pub raw: RawEthscription,
+}
+
+#[derive(Debug, Clone)]
+pub struct FieldSelection {
+    pub with: Vec<String>,
+    pub only: Vec<String>,
+    pub latest_transfer: bool,
 }
 
 /// Result from `check_exists`.
@@ -181,11 +188,10 @@ pub struct ResolveUserResult {
     pub name: String,
 }
 
-/// Result from `get_user_profile`.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone)]
 pub struct UserProfileResult {
-    pub latest: Ethscription,
-    pub previous: Vec<Ethscription>,
+    pub latest: Record,
+    pub previous: Vec<Record>,
 }
 
 /// Result from `get_digest_for_data`.
@@ -310,11 +316,10 @@ pub struct Pagination {
     pub page_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct EthscriptionListResult {
     pub pagination: Option<Pagination>,
-    pub raws: Vec<RawEthscription>,
-    pub result: Vec<Ethscription>,
+    pub records: Vec<Record>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

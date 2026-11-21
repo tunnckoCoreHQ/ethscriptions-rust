@@ -8,15 +8,12 @@ use crate::digest::{compute_bytes_digest, estimate_gas};
 use crate::encode::{parse_data_uri, ungzip_bytes};
 use crate::error::ApiError;
 use crate::filters::normalize_filters;
-use crate::normalize::{
-    extract_numbers, extract_owners, normalize_ethscription, normalize_transfers,
-};
+use crate::normalize::normalize_ethscription;
 use crate::types::{
     CheckExistResult, CostBreakdown, CostMeta, DigestResult, EstimateCostResult, Ethscription,
-    EthscriptionListResult, EthscriptionTransfer, GasTrackerResponse, ModeResponse, PricesResult,
-    RawEthscription, RawRecentPulseEvent, RecentPulseEvent, RecentPulseResult,
-    UpstreamExistsResponse, UpstreamListResponse, UpstreamPulseResponse, UpstreamSingleResponse,
-    UserProfileResult,
+    EthscriptionListResult, GasTrackerResponse, PricesResult, RawEthscription, RawRecentPulseEvent,
+    RecentPulseEvent, RecentPulseResult, Record, UpstreamExistsResponse, UpstreamListResponse,
+    UpstreamPulseResponse, UpstreamSingleResponse, UserProfileResult,
 };
 use crate::validate::{is_valid_address, is_valid_hash};
 use url::form_urlencoded::Serializer;
@@ -73,13 +70,9 @@ impl Client {
 
         let data: UpstreamListResponse = self.get_json(&url).await.map_err(list_error)?;
 
-        let ethscriptions: Vec<Ethscription> =
-            data.result.iter().map(normalize_ethscription).collect();
-
         Ok(EthscriptionListResult {
             pagination: data.pagination,
-            raws: data.result,
-            result: ethscriptions,
+            records: data.result.into_iter().map(Record::from).collect(),
         })
     }
 
@@ -98,28 +91,23 @@ impl Client {
     /// Fetch a single ethscription by ID.
     ///
     /// Corresponds to `GET /ethscriptions/{id}`.
-    pub async fn fetch_ethscription(
-        &self,
-        id: &str,
-    ) -> Result<(Ethscription, RawEthscription), ApiError> {
+    pub async fn fetch_ethscription(&self, id: &str) -> Result<Record, ApiError> {
         let cache_key = cache_key_from_parts(&[&self.api_url, "ethscription", id]);
-        if let Some(cached) = self
+        if let Some((normalized, raw)) = self
             .cache
             .load::<(Ethscription, RawEthscription)>("ethscription", &cache_key)?
         {
-            return Ok(cached);
+            return Ok(Record { normalized, raw });
         }
 
-        let result = self.fetch_ethscription_uncached(id).await?;
+        let record = self.fetch_ethscription_uncached(id).await?;
+        let cached = (&record.normalized, &record.raw);
         self.cache
-            .store("ethscription", &cache_key, CacheTtl::Week, &result)?;
-        Ok(result)
+            .store("ethscription", &cache_key, CacheTtl::Week, &cached)?;
+        Ok(record)
     }
 
-    async fn fetch_ethscription_uncached(
-        &self,
-        id: &str,
-    ) -> Result<(Ethscription, RawEthscription), ApiError> {
+    pub async fn fetch_ethscription_uncached(&self, id: &str) -> Result<Record, ApiError> {
         let url = format!("{}/ethscriptions/{id}", self.api_url);
 
         let data: UpstreamSingleResponse = self.get_json(&url).await.map_err(|f| match f {
@@ -129,47 +117,7 @@ impl Client {
             f => list_error(f),
         })?;
 
-        let normalized = normalize_ethscription(&data.result);
-        Ok((normalized, data.result))
-    }
-
-    /// Fetch a single ethscription by ID and return specific mode details.
-    pub async fn fetch_ethscription_mode(
-        &self,
-        id: &str,
-        mode: Option<&str>,
-    ) -> Result<ModeResponse, ApiError> {
-        match mode {
-            Some("owners") => {
-                let (eth, raw) = self.fetch_ethscription_uncached(id).await?;
-                let transfers = extract_transfers(&raw);
-                let owners = extract_owners(&eth, &raw, &transfers);
-                Ok(ModeResponse::Json(
-                    serde_json::to_value(&owners).unwrap_or_default(),
-                ))
-            }
-            Some("numbers") => {
-                let (eth, raw) = self.fetch_ethscription(id).await?;
-                let transfers = extract_transfers(&raw);
-                let numbers = extract_numbers(&eth, &raw, &transfers);
-                Ok(ModeResponse::Json(
-                    serde_json::to_value(&numbers).unwrap_or_default(),
-                ))
-            }
-            Some("transfer") | Some("transfers") => {
-                let (_, raw) = self.fetch_ethscription(id).await?;
-                let transfers = extract_transfers(&raw);
-                Ok(ModeResponse::Json(
-                    serde_json::to_value(&transfers).unwrap_or_default(),
-                ))
-            }
-            _ => {
-                let (eth, _) = self.fetch_ethscription(id).await?;
-                Ok(ModeResponse::Json(
-                    serde_json::to_value(&eth).unwrap_or_default(),
-                ))
-            }
-        }
+        Ok(Record::from(data.result))
     }
 
     /// Fetch ethscription content from a content URI.
@@ -358,16 +306,16 @@ impl Client {
             params.insert("resolve".to_string(), "true".to_string());
         }
 
-        let ethscriptions = self.fetch_ethscriptions(&params).await?;
-        let Some((latest, previous)) = ethscriptions.result.split_first() else {
+        let mut records = self.fetch_ethscriptions(&params).await?.records.into_iter();
+        let Some(latest) = records.next() else {
             return Err(ApiError::not_found(format!(
                 "No user profile found for {value}"
             )));
         };
 
         Ok(UserProfileResult {
-            latest: latest.clone(),
-            previous: previous.to_vec(),
+            latest,
+            previous: records.collect(),
         })
     }
 
@@ -527,14 +475,6 @@ impl ContentData {
     }
 }
 
-/// Fetch transfers for an ethscription from raw upstream data.
-pub fn extract_transfers(raw: &RawEthscription) -> Vec<EthscriptionTransfer> {
-    match &raw.ethscription_transfers {
-        Some(transfers) => normalize_transfers(transfers),
-        None => Vec::new(),
-    }
-}
-
 /// Build a query string from a `HashMap`, sorted by key for determinism.
 fn build_qs(params: &HashMap<String, String>) -> String {
     let mut pairs: Vec<(&str, &str)> = params
@@ -613,7 +553,7 @@ mod tests {
     use crate::types::{RawEthscription, RawTransfer};
 
     // -----------------------------------------------------------------------
-    // extract_transfers
+    // Record::transfers
     // -----------------------------------------------------------------------
 
     fn make_raw_ethscription(transfers: Option<Vec<RawTransfer>>) -> RawEthscription {
@@ -646,21 +586,21 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_transfers_none() {
+    fn test_record_transfers_none() {
         let raw = make_raw_ethscription(None);
-        let transfers = extract_transfers(&raw);
+        let transfers = Record::from(raw).transfers();
         assert_eq!(transfers.is_empty(), true);
     }
 
     #[test]
-    fn test_extract_transfers_empty_vec() {
+    fn test_record_transfers_empty_vec() {
         let raw = make_raw_ethscription(Some(vec![]));
-        let transfers = extract_transfers(&raw);
+        let transfers = Record::from(raw).transfers();
         assert_eq!(transfers.is_empty(), true);
     }
 
     #[test]
-    fn test_extract_transfers_with_data() {
+    fn test_record_transfers_with_data() {
         let raw_transfers = vec![
             RawTransfer {
                 ethscription_transaction_hash: Some("0xabc".to_string()),
@@ -688,7 +628,7 @@ mod tests {
             },
         ];
         let raw = make_raw_ethscription(Some(raw_transfers));
-        let transfers = extract_transfers(&raw);
+        let transfers = Record::from(raw).transfers();
 
         assert_eq!(transfers.len(), 2);
         // Sorted newest first (block 200 before 100)
@@ -702,7 +642,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_transfers_fields() {
+    fn test_record_transfers_fields() {
         let raw_transfers = vec![RawTransfer {
             ethscription_transaction_hash: Some("0xabc".to_string()),
             transaction_hash: Some("0xtx1".to_string()),
@@ -716,7 +656,7 @@ mod tests {
             enforced_previous_owner: None,
         }];
         let raw = make_raw_ethscription(Some(raw_transfers));
-        let transfers = extract_transfers(&raw);
+        let transfers = Record::from(raw).transfers();
 
         assert_eq!(transfers.len(), 1);
         assert_eq!(transfers[0].block_number, "100");

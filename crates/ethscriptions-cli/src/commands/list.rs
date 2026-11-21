@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use clap::Args;
 use ethscriptions_sdk::client::Client;
-use ethscriptions_sdk::normalize::apply_field_selection_list;
+use ethscriptions_sdk::types::FieldSelection;
 use serde::Serialize;
 
 use crate::output::print_json;
@@ -228,21 +228,27 @@ pub async fn run(client: &Client, args: ListArgs, pretty: bool) -> Result<(), St
         args.with_fields.is_some() || args.only.is_some() || args.latest_transfer;
 
     if has_field_selection {
-        let selected = apply_field_selection_list(
-            &list_result.result,
-            &list_result.raws,
+        let selection = FieldSelection::new(
             args.with_fields.as_deref(),
             args.only.as_deref(),
-            Some(args.latest_transfer),
+            args.latest_transfer,
         );
         let output = ListOutput {
-            result: selected,
+            result: list_result
+                .records
+                .iter()
+                .map(|record| record.select(&selection))
+                .collect::<Vec<_>>(),
             pagination: list_result.pagination,
         };
         print_json(&output, pretty);
     } else {
         let output = ListOutput {
-            result: list_result.result,
+            result: list_result
+                .records
+                .into_iter()
+                .map(|record| record.normalized)
+                .collect::<Vec<_>>(),
             pagination: list_result.pagination,
         };
         print_json(&output, pretty);
