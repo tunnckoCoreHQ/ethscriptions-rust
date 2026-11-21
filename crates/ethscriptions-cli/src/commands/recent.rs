@@ -4,7 +4,7 @@ use clap::Args;
 use ethscriptions_sdk::client::Client;
 use ethscriptions_sdk::query::PulseQuery;
 
-use crate::output::print_json;
+use crate::output::{Error, Output};
 
 #[derive(Args)]
 #[command(next_display_order = None)]
@@ -50,7 +50,7 @@ pub struct RecentArgs {
     pub page_key: Option<String>,
 }
 
-pub async fn run(client: &Client, args: RecentArgs, pretty: bool) -> Result<(), String> {
+pub async fn run(client: &Client, args: RecentArgs, pretty: bool) -> Result<Output, Error> {
     let query = PulseQuery {
         from_address: args.from_address,
         to_address: args.to_address,
@@ -65,11 +65,7 @@ pub async fn run(client: &Client, args: RecentArgs, pretty: bool) -> Result<(), 
         resolve: true,
     };
 
-    let result = client
-        .fetch_recent_pulse(query)
-        .await
-        .map_err(|e| e.to_string())?;
+    let result = client.fetch_recent_pulse(query).await?;
 
-    print_json(&result, pretty);
-    Ok(())
+    Ok(Output::json(&result, pretty))
 }

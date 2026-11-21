@@ -3,7 +3,7 @@
 use clap::Args;
 use ethscriptions_sdk::client::Client;
 
-use crate::output::print_json;
+use crate::output::{Error, Output};
 
 #[derive(Args)]
 #[command(next_display_order = None)]
@@ -13,12 +13,8 @@ pub struct GasArgs {
     pub speed: String,
 }
 
-pub async fn run(client: &Client, args: GasArgs, pretty: bool) -> Result<(), String> {
-    let result = client
-        .fetch_gas_prices(&args.speed)
-        .await
-        .map_err(|e| e.to_string())?;
+pub async fn run(client: &Client, args: GasArgs, pretty: bool) -> Result<Output, Error> {
+    let result = client.fetch_gas_prices(&args.speed).await?;
 
-    print_json(&result, pretty);
-    Ok(())
+    Ok(Output::json(&result, pretty))
 }

@@ -6,7 +6,7 @@ use ethscriptions_sdk::query::ListQuery;
 use ethscriptions_sdk::types::FieldSelection;
 use serde::Serialize;
 
-use crate::output::print_json;
+use crate::output::{Error, Output};
 
 #[derive(Args)]
 #[command(next_display_order = None)]
@@ -137,7 +137,7 @@ struct ListOutput<T: Serialize, P: Serialize> {
     pagination: Option<P>,
 }
 
-pub async fn run(client: &Client, args: ListArgs, pretty: bool) -> Result<(), String> {
+pub async fn run(client: &Client, args: ListArgs, pretty: bool) -> Result<Output, Error> {
     let query = ListQuery {
         creator: args.creator,
         receiver: args.receiver,
@@ -165,10 +165,7 @@ pub async fn run(client: &Client, args: ListArgs, pretty: bool) -> Result<(), St
         resolve: args.resolve,
     };
 
-    let list_result = client
-        .fetch_ethscriptions(query)
-        .await
-        .map_err(|e| e.to_string())?;
+    let list_result = client.fetch_ethscriptions(query).await?;
 
     let has_field_selection =
         args.with_fields.is_some() || args.only.is_some() || args.latest_transfer;
@@ -187,7 +184,7 @@ pub async fn run(client: &Client, args: ListArgs, pretty: bool) -> Result<(), St
                 .collect::<Vec<_>>(),
             pagination: list_result.pagination,
         };
-        print_json(&output, pretty);
+        Ok(Output::json(&output, pretty))
     } else {
         let output = ListOutput {
             result: list_result
@@ -197,8 +194,6 @@ pub async fn run(client: &Client, args: ListArgs, pretty: bool) -> Result<(), St
                 .collect::<Vec<_>>(),
             pagination: list_result.pagination,
         };
-        print_json(&output, pretty);
+        Ok(Output::json(&output, pretty))
     }
-
-    Ok(())
 }

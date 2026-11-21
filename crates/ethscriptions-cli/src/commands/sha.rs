@@ -7,8 +7,8 @@ use ethscriptions_sdk::client::Client;
 use ethscriptions_sdk::digest::compute_name_digest;
 use serde::Serialize;
 
-use crate::input::require_input;
-use crate::output::print_json;
+use crate::input::Stdin;
+use crate::output::{Error, Output};
 
 #[derive(Args)]
 #[command(next_display_order = None)]
@@ -54,7 +54,12 @@ fn build_data_uri(bytes: &[u8], no_content_type: bool) -> String {
     )
 }
 
-pub async fn run(client: &Client, args: ShaArgs, pretty: bool) -> Result<(), String> {
+pub async fn run(
+    client: &Client,
+    args: ShaArgs,
+    stdin: &mut Stdin,
+    pretty: bool,
+) -> Result<Output, Error> {
     // --name shortcut: compute digest for `data:,{name}`
     if let Some(name) = &args.name {
         let sha = compute_name_digest(name);
@@ -64,14 +69,14 @@ pub async fn run(client: &Client, args: ShaArgs, pretty: bool) -> Result<(), Str
                 hex: None,
                 data_uri: Some(format!("data:,{name}")),
             };
-            print_json(&output, pretty);
-        } else {
-            print!("{sha}");
+            return Ok(Output::json(&output, pretty));
         }
-        return Ok(());
+        return Ok(Output::Text(sha));
     }
 
-    let bytes = require_input(args.file.as_ref(), args.data.as_deref(), "sha")?;
+    let bytes = stdin
+        .require_input(args.file.as_ref(), args.data.as_deref(), "sha")?
+        .bytes;
     let source_data_uri = if args.file.is_none() {
         args.data
             .as_ref()
@@ -80,10 +85,7 @@ pub async fn run(client: &Client, args: ShaArgs, pretty: bool) -> Result<(), Str
     } else {
         None
     };
-    let result = client
-        .get_digest_for_data(&bytes, false)
-        .await
-        .map_err(|e| e.to_string())?;
+    let result = client.get_digest_for_data(&bytes, false).await?;
 
     if args.json {
         let output = ShaOutput {
@@ -93,10 +95,46 @@ pub async fn run(client: &Client, args: ShaArgs, pretty: bool) -> Result<(), Str
                 source_data_uri.unwrap_or_else(|| build_data_uri(&bytes, args.no_content_type)),
             ),
         };
-        print_json(&output, pretty);
+        Ok(Output::json(&output, pretty))
     } else {
-        print!("{}", result.sha);
+        Ok(Output::Text(result.sha))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+    use ethscriptions_sdk::digest::compute_digest;
+
+    use super::*;
+    use crate::{Cli, Commands};
+
+    async fn sha(argv: &[&str], mut stdin: Stdin) -> Output {
+        let Commands::Sha(args) = Cli::parse_from(argv).command else {
+            panic!("not a sha command");
+        };
+        run(&Client::new(None), args, &mut stdin, false)
+            .await
+            .unwrap()
     }
 
-    Ok(())
+    #[tokio::test]
+    async fn name_digest_has_no_newline() {
+        let output = sha(&["eths", "sha", "--name", "wgw"], Stdin::terminal()).await;
+        assert!(matches!(output, Output::Text(text) if text == compute_name_digest("wgw")));
+    }
+
+    #[tokio::test]
+    async fn json_data_uri_comes_from_the_arg_even_when_stdin_wins() {
+        let output = sha(
+            &["eths", "sha", "--json", "data:,x"],
+            Stdin::piped(b"other"),
+        )
+        .await;
+        let expected = format!(
+            "{{\"data_uri\":\"data:,x\",\"hex\":\"6f74686572\",\"sha\":\"{}\"}}\n",
+            compute_digest(b"other")
+        );
+        assert!(matches!(output, Output::Text(text) if text == expected));
+    }
 }

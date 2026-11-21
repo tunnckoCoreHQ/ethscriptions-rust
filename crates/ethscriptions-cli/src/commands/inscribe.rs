@@ -10,8 +10,8 @@ use ethscriptions_sdk::encode::InputSource;
 use ethscriptions_sdk::error::ApiError;
 use ethscriptions_sdk::inscribe::{self, InscribeOptions, PrepareInscribeOptions};
 
-use crate::input::read_input;
-use crate::output::print_json;
+use crate::input::Stdin;
+use crate::output::{Error, Output};
 
 #[derive(Args)]
 #[command(next_display_order = None)]
@@ -74,8 +74,17 @@ pub struct InscribeArgs {
 
 const DEFAULT_RPC_URL: &str = "https://ethereum-rpc.publicnode.com";
 
-pub async fn run(client: &Client, args: InscribeArgs, pretty: bool) -> Result<(), String> {
-    let (bytes, source) = resolve_input(args.file.as_ref(), args.data.as_deref())?;
+pub async fn run(
+    client: &Client,
+    args: InscribeArgs,
+    stdin: &mut Stdin,
+    pretty: bool,
+) -> Result<Output, Error> {
+    let input = stdin.require_input(args.file.as_ref(), args.data.as_deref(), "inscribe")?;
+    let source = match input.source {
+        InputSource::Stdin if args.data.is_some() => InputSource::Literal,
+        source => source,
+    };
 
     let env_file = match &args.env_file {
         Some(path) => read_env_file(path)?,
@@ -95,15 +104,14 @@ pub async fn run(client: &Client, args: InscribeArgs, pretty: bool) -> Result<()
         (None, None) => Err(ApiError::bad_request(
             "Missing signer. Pass private_key or mnemonic, or set ETHS_PRIVATE_KEY / ETHS_MNEMONIC.",
         )),
-    }
-    .map_err(|e| e.to_string())?;
+    }?;
 
     let result = inscribe::inscribe(
         client,
         signer,
         rpc_url.as_deref().unwrap_or(DEFAULT_RPC_URL),
         &InscribeOptions {
-            bytes,
+            bytes: input.bytes,
             prepare: PrepareInscribeOptions {
                 source,
                 optimize: args.optimize,
@@ -118,34 +126,12 @@ pub async fn run(client: &Client, args: InscribeArgs, pretty: bool) -> Result<()
             chain_id: args.chain_id,
         },
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
-    match result {
-        inscribe::InscribeResult::Submitted(submitted) => print_json(&submitted, pretty),
-        inscribe::InscribeResult::DryRun(dry_run) => print_json(&dry_run, pretty),
-    }
-
-    Ok(())
-}
-
-fn resolve_input(
-    file: Option<&PathBuf>,
-    data: Option<&str>,
-) -> Result<(Vec<u8>, InputSource), String> {
-    let bytes = read_input(file, data)?.ok_or_else(|| {
-        "No input provided. Use --file <path>, pipe via stdin, or pass as argument.\nRun `eths inscribe --help` for usage.".to_string()
-    })?;
-
-    let source = if file.is_some() {
-        InputSource::File
-    } else if data.is_some() {
-        InputSource::Literal
-    } else {
-        InputSource::Stdin
-    };
-
-    Ok((bytes, source))
+    Ok(match result {
+        inscribe::InscribeResult::Submitted(submitted) => Output::json(&submitted, pretty),
+        inscribe::InscribeResult::DryRun(dry_run) => Output::json(&dry_run, pretty),
+    })
 }
 
 fn read_env_file(path: &str) -> Result<HashMap<String, String>, String> {

@@ -4,8 +4,8 @@ use clap::{Args, CommandFactory};
 use ethscriptions_sdk::client::Client;
 
 use crate::Cli;
-use crate::input::require_text_arg;
-use crate::output::print_json;
+use crate::input::Stdin;
+use crate::output::{Error, Output};
 
 #[derive(Args)]
 #[command(next_display_order = None)]
@@ -22,29 +22,26 @@ pub struct ResolveArgs {
     pub json: bool,
 }
 
-pub async fn run(client: &Client, args: ResolveArgs, pretty: bool) -> Result<(), String> {
-    let name = match require_text_arg(args.name.as_deref(), "resolve") {
+pub async fn run(
+    client: &Client,
+    args: ResolveArgs,
+    stdin: &mut Stdin,
+    pretty: bool,
+) -> Result<Output, Error> {
+    let name = match stdin.require_text_arg(args.name.as_deref(), "resolve") {
         Ok(val) => val,
         Err(_) => {
-            let mut cmd = Cli::command();
-            let sub = cmd
-                .find_subcommand_mut("resolve")
-                .expect("resolve subcommand");
-            sub.print_help().map_err(|e| e.to_string())?;
-            println!();
-            return Ok(());
+            let cmd = Cli::command();
+            let sub = cmd.find_subcommand("resolve").expect("resolve subcommand");
+            return Ok(Output::Help(Box::new(sub.clone())));
         }
     };
 
-    let result = client
-        .resolve_user(&name, args.check_creator)
-        .await
-        .map_err(|e| e.to_string())?;
+    let result = client.resolve_user(&name, args.check_creator).await?;
 
     if args.json {
-        print_json(&result, pretty);
+        Ok(Output::json(&result, pretty))
     } else {
-        println!("{}", result.address);
+        Ok(Output::Text(format!("{}\n", result.address)))
     }
-    Ok(())
 }

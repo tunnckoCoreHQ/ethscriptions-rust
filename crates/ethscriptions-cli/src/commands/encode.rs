@@ -9,8 +9,8 @@ use ethscriptions_sdk::encode::{DataUriOptions, build_data_uri, detect_content_t
 use ethscriptions_sdk::validate::bytes_to_hex;
 use serde::Serialize;
 
-use crate::input::require_input;
-use crate::output::print_json;
+use crate::input::Stdin;
+use crate::output::{Error, Output};
 
 #[derive(Args)]
 #[command(next_display_order = None)]
@@ -61,8 +61,10 @@ struct EncodeOutput {
     data_uri: Option<String>,
 }
 
-pub fn run(args: EncodeArgs, pretty: bool) -> Result<(), String> {
-    let bytes = require_input(args.file.as_ref(), args.data.as_deref(), "encode")?;
+pub fn run(args: EncodeArgs, stdin: &mut Stdin, pretty: bool) -> Result<Output, Error> {
+    let bytes = stdin
+        .require_input(args.file.as_ref(), args.data.as_deref(), "encode")?
+        .bytes;
     let content_type = detect_content_type(&bytes);
     let explicit_outputs = [args.sha, args.hex, args.base64, args.data_uri]
         .into_iter()
@@ -71,7 +73,7 @@ pub fn run(args: EncodeArgs, pretty: bool) -> Result<(), String> {
     if args.raw && explicit_outputs != 1 {
         return Err(
             "`--raw` requires exactly one explicit output flag like `--hex`, `--base64`, `--data-uri`, or `--sha`."
-                .to_string(),
+                .into(),
         );
     }
 
@@ -80,8 +82,7 @@ pub fn run(args: EncodeArgs, pretty: bool) -> Result<(), String> {
         && matches!(args.data.as_deref(), Some(data) if data.starts_with("data:"))
     {
         return Err(
-            "`--data-uri` cannot be used when the direct input already starts with `data:`."
-                .to_string(),
+            "`--data-uri` cannot be used when the direct input already starts with `data:`.".into(),
         );
     }
 
@@ -125,8 +126,7 @@ pub fn run(args: EncodeArgs, pretty: bool) -> Result<(), String> {
                 "`--raw` requires exactly one explicit output flag like `--hex`, `--base64`, `--data-uri`, or `--sha`."
                     .to_string()
             })?;
-        print!("{raw_value}");
-        return Ok(());
+        return Ok(Output::Text(raw_value));
     }
 
     let output = EncodeOutput {
@@ -138,6 +138,49 @@ pub fn run(args: EncodeArgs, pretty: bool) -> Result<(), String> {
         data_uri,
     };
 
-    print_json(&output, pretty);
-    Ok(())
+    Ok(Output::json(&output, pretty))
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+    use crate::{Cli, Commands};
+
+    fn encode(argv: &[&str], mut stdin: Stdin) -> Result<Output, Error> {
+        let Commands::Encode(args) = Cli::parse_from(argv).command else {
+            panic!("not an encode command");
+        };
+        run(args, &mut stdin, false)
+    }
+
+    #[test]
+    fn raw_prints_the_value_without_newline() {
+        let output = encode(
+            &["eths", "encode", "--raw", "--hex", "hello"],
+            Stdin::terminal(),
+        );
+        assert!(matches!(output, Ok(Output::Text(text)) if text == "68656c6c6f"));
+    }
+
+    #[test]
+    fn data_uri_rejects_a_data_uri_arg() {
+        let err = encode(
+            &["eths", "encode", "--data-uri", "data:,x"],
+            Stdin::terminal(),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(
+            err.0,
+            "`--data-uri` cannot be used when the direct input already starts with `data:`."
+        );
+    }
+
+    #[test]
+    fn data_uri_accepts_a_piped_data_uri() {
+        let output = encode(&["eths", "encode", "--data-uri"], Stdin::piped(b"data:,x"));
+        assert!(matches!(output, Ok(Output::Text(text)) if text.contains("\"size\":7")));
+    }
 }

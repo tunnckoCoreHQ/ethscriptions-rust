@@ -6,8 +6,8 @@ use ethscriptions_sdk::query::ListQuery;
 use ethscriptions_sdk::types::{FieldSelection, Pagination, RawEthscription};
 use serde::Serialize;
 
-use crate::input::require_text_arg;
-use crate::output::print_json;
+use crate::input::Stdin;
+use crate::output::{Error, Output};
 
 #[derive(Serialize)]
 struct ListOutput<T: Serialize, P: Serialize> {
@@ -56,23 +56,23 @@ pub struct ProfileArgs {
     pub with_fields: Option<String>,
 }
 
-pub async fn run(client: &Client, args: ProfileArgs, pretty: bool) -> Result<(), String> {
-    let name = require_text_arg(args.name.as_deref(), "profile")?;
+pub async fn run(
+    client: &Client,
+    args: ProfileArgs,
+    stdin: &mut Stdin,
+    pretty: bool,
+) -> Result<Output, Error> {
+    let name = stdin.require_text_arg(args.name.as_deref(), "profile")?;
 
     if args.created || args.owned {
         let output = fetch_profile_list(client, &name, &args).await?;
-        print_json(&output, pretty);
-        return Ok(());
+        return Ok(Output::json(&output, pretty));
     }
 
-    let profile = client
-        .fetch_user_profile(&name)
-        .await
-        .map_err(|e| e.to_string())?;
+    let profile = client.fetch_user_profile(&name).await?;
 
     if args.info {
-        print_profile_info(client, &profile.latest.raw, pretty).await?;
-        return Ok(());
+        return profile_info(client, &profile.latest.raw, pretty).await;
     }
 
     let selection = field_selection(&args).with_field("content_uri");
@@ -84,15 +84,14 @@ pub async fn run(client: &Client, args: ProfileArgs, pretty: bool) -> Result<(),
             .map(|record| record.select(&selection))
             .collect(),
     };
-    print_json(&output, pretty);
-    Ok(())
+    Ok(Output::json(&output, pretty))
 }
 
 async fn fetch_profile_list(
     client: &Client,
     name: &str,
     args: &ProfileArgs,
-) -> Result<ListOutput<Vec<serde_json::Value>, Pagination>, String> {
+) -> Result<ListOutput<Vec<serde_json::Value>, Pagination>, Error> {
     let query = ListQuery {
         page_size: args.page_size,
         page_key: args.page_key.clone(),
@@ -100,15 +99,9 @@ async fn fetch_profile_list(
     };
 
     let list_result = if args.created {
-        client
-            .fetch_user_created_ethscriptions(name, query)
-            .await
-            .map_err(|e| e.to_string())?
+        client.fetch_user_created_ethscriptions(name, query).await?
     } else {
-        client
-            .fetch_user_owned_ethscriptions(name, query)
-            .await
-            .map_err(|e| e.to_string())?
+        client.fetch_user_owned_ethscriptions(name, query).await?
     };
 
     let selection = field_selection(args);
@@ -126,11 +119,11 @@ fn field_selection(args: &ProfileArgs) -> FieldSelection {
     FieldSelection::new(args.with_fields.as_deref(), args.only.as_deref(), false)
 }
 
-async fn print_profile_info(
+async fn profile_info(
     client: &Client,
     latest: &RawEthscription,
     pretty: bool,
-) -> Result<(), String> {
+) -> Result<Output, Error> {
     let content_uri = latest
         .content_uri
         .as_deref()
@@ -138,12 +131,10 @@ async fn print_profile_info(
 
     let (content, _content_type) = client
         .fetch_ethscription_content(content_uri, Some(false), Some(false))
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
     let bytes = content.as_bytes();
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|e| format!("Failed to parse profile content JSON: {e}"))?;
 
-    print_json(&value, pretty);
-    Ok(())
+    Ok(Output::json(&value, pretty))
 }
