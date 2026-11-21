@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use std::collections::HashMap;
-
 use clap::Args;
 use ethscriptions_sdk::client::Client;
+use ethscriptions_sdk::query::ListQuery;
 use ethscriptions_sdk::types::{FieldSelection, Pagination, RawEthscription};
 use serde::Serialize;
 
@@ -94,24 +93,20 @@ async fn fetch_profile_list(
     name: &str,
     args: &ProfileArgs,
 ) -> Result<ListOutput<Vec<serde_json::Value>, Pagination>, String> {
-    let mut params = HashMap::new();
-
-    if let Some(page_size) = args.page_size {
-        params.insert("page_size".to_string(), page_size.to_string());
-    }
-
-    if let Some(page_key) = &args.page_key {
-        params.insert("page_key".to_string(), page_key.clone());
-    }
+    let query = ListQuery {
+        page_size: args.page_size,
+        page_key: args.page_key.clone(),
+        ..ListQuery::default()
+    };
 
     let list_result = if args.created {
         client
-            .fetch_user_created_ethscriptions(name, &params)
+            .fetch_user_created_ethscriptions(name, query)
             .await
             .map_err(|e| e.to_string())?
     } else {
         client
-            .fetch_user_owned_ethscriptions(name, &params)
+            .fetch_user_owned_ethscriptions(name, query)
             .await
             .map_err(|e| e.to_string())?
     };

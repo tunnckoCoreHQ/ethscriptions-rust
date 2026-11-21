@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use ethscriptions_sdk::cache::Cache;
 use ethscriptions_sdk::client::Client;
 use ethscriptions_sdk::fetcher::ContentData;
+use ethscriptions_sdk::query::{ListQuery, PulseQuery};
 
 const HASH: &str = "0xabababababababababababababababababababababababababababababababab";
 const SHA: &str = "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd";
@@ -125,13 +126,6 @@ fn single() -> String {
     format!(r#"{{"result":{}}}"#, raw_ethscription("data:,hello"))
 }
 
-fn params(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-    pairs
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect()
-}
-
 const GAS: &str = r#"{"data":{"blockNr":"21000000","baseFee":10.5,"nextFee":11.25,"ethPrice":3000,"oracle":{"slow":{"gasFee":0.5,"priorityFee":0.1,"gwei":10},"normal":{"gasFee":0.75,"priorityFee":0.2,"gwei":12},"fast":{"gasFee":1.0,"priorityFee":0.5,"gwei":15}}}}"#;
 
 #[tokio::test]
@@ -145,7 +139,11 @@ async fn fetch_ethscriptions_builds_query_and_maps_errors() {
     stub.json("/ethscriptions", 200, &body);
 
     let list = client
-        .fetch_ethscriptions(&params(&[("creator", ADDR), ("media_type", "text")]))
+        .fetch_ethscriptions(ListQuery {
+            creator: Some(ADDR.to_string()),
+            media_type: Some("text".to_string()),
+            ..ListQuery::default()
+        })
         .await
         .unwrap();
     assert_eq!(list.records.len(), 1);
@@ -157,14 +155,20 @@ async fn fetch_ethscriptions_builds_query_and_maps_errors() {
     );
 
     stub.json("/ethscriptions", 500, "{}");
-    let err = client.fetch_ethscriptions(&params(&[])).await.unwrap_err();
+    let err = client
+        .fetch_ethscriptions(ListQuery::default())
+        .await
+        .unwrap_err();
     assert_eq!(
         err.to_string(),
         "Upstream error: Upstream returned status 500 Internal Server Error"
     );
 
     stub.json("/ethscriptions", 200, "[]");
-    let err = client.fetch_ethscriptions(&params(&[])).await.unwrap_err();
+    let err = client
+        .fetch_ethscriptions(ListQuery::default())
+        .await
+        .unwrap_err();
     assert_eq!(
         err.to_string(),
         "Internal error: Failed to parse upstream response: error decoding response body"
@@ -174,7 +178,10 @@ async fn fetch_ethscriptions_builds_query_and_maps_errors() {
         api_url: dead_url(),
         ..client.clone()
     };
-    let err = dead.fetch_ethscriptions(&params(&[])).await.unwrap_err();
+    let err = dead
+        .fetch_ethscriptions(ListQuery::default())
+        .await
+        .unwrap_err();
     assert!(
         err.to_string()
             .starts_with("Upstream error: Fetch failed unexpectedly: error sending request"),
@@ -194,7 +201,11 @@ async fn fetch_ethscriptions_resolves_names_through_ens() {
     stub.json("/ethscriptions", 200, r#"{"result":[]}"#);
 
     client
-        .fetch_ethscriptions(&params(&[("creator", "wgw.eth"), ("resolve", "true")]))
+        .fetch_ethscriptions(ListQuery {
+            creator: Some("wgw.eth".to_string()),
+            resolve: true,
+            ..ListQuery::default()
+        })
         .await
         .unwrap();
     assert_eq!(
@@ -365,7 +376,10 @@ async fn fetch_recent_pulse_reads_transfers() {
     );
     stub.json("/ethscription_transfers", 200, &body);
     let pulse = client
-        .fetch_recent_pulse(&params(&[("page_size", "1")]))
+        .fetch_recent_pulse(PulseQuery {
+            page_size: Some(1),
+            ..PulseQuery::default()
+        })
         .await
         .unwrap();
     assert_eq!(pulse.result[0].event_type, "transfer");

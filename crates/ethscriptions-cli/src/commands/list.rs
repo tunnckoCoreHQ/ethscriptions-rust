@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use std::collections::HashMap;
-
 use clap::Args;
 use ethscriptions_sdk::client::Client;
+use ethscriptions_sdk::query::ListQuery;
 use ethscriptions_sdk::types::FieldSelection;
 use serde::Serialize;
 
@@ -132,30 +131,6 @@ pub struct ListArgs {
     pub resolve: bool,
 }
 
-fn insert_str(params: &mut HashMap<String, String>, key: &str, val: &Option<String>) {
-    if let Some(v) = val {
-        params.insert(key.to_string(), v.clone());
-    }
-}
-
-fn insert_bool(params: &mut HashMap<String, String>, key: &str, val: bool) {
-    if val {
-        params.insert(key.to_string(), "true".to_string());
-    }
-}
-
-fn insert_u32(params: &mut HashMap<String, String>, key: &str, val: Option<u32>) {
-    if let Some(v) = val {
-        params.insert(key.to_string(), v.to_string());
-    }
-}
-
-fn insert_u64(params: &mut HashMap<String, String>, key: &str, val: Option<u64>) {
-    if let Some(v) = val {
-        params.insert(key.to_string(), v.to_string());
-    }
-}
-
 #[derive(Serialize)]
 struct ListOutput<T: Serialize, P: Serialize> {
     result: T,
@@ -163,64 +138,35 @@ struct ListOutput<T: Serialize, P: Serialize> {
 }
 
 pub async fn run(client: &Client, args: ListArgs, pretty: bool) -> Result<(), String> {
-    let mut params = HashMap::new();
-
-    // Address filters
-    insert_str(&mut params, "creator", &args.creator);
-    insert_str(&mut params, "receiver", &args.receiver);
-    insert_str(&mut params, "current", &args.current_owner);
-    insert_str(&mut params, "previous", &args.previous_owner);
-
-    // Content type filters
-    insert_str(&mut params, "media_type", &args.media_type);
-    insert_str(&mut params, "media_subtype", &args.media_subtype);
-    insert_str(&mut params, "content_type", &args.content_type);
-
-    // Content / hash filters
-    insert_str(&mut params, "content_sha", &args.content_sha);
-
-    // Block filters
-    insert_str(&mut params, "block_number", &args.block_number);
-    insert_str(&mut params, "block_hash", &args.block_hash);
-    insert_u64(&mut params, "after_block", args.after_block);
-    insert_u64(&mut params, "before_block", args.before_block);
-
-    // Attachment / ESIP-8 filters
-    insert_str(&mut params, "attachment_sha", &args.attachment_sha);
-    insert_str(
-        &mut params,
-        "attachment_content_type",
-        &args.attachment_content_type,
-    );
-    insert_bool(&mut params, "attachment_present", args.attachment_present);
-
-    // Token filters
-    insert_str(&mut params, "token_tick", &args.token_tick);
-    insert_str(&mut params, "token_protocol", &args.token_protocol);
-
-    // Transfer filter
-    insert_str(&mut params, "transferred_in_tx", &args.transferred_in_tx);
-
-    // Response shape
-    insert_bool(
-        &mut params,
-        "transaction_hash_only",
-        args.transaction_hash_only,
-    );
-
-    // Sorting
-    insert_str(&mut params, "sort_by", &args.sort_by);
-    insert_bool(&mut params, "reverse", args.reverse);
-
-    // Pagination
-    insert_u32(&mut params, "page_size", args.page_size);
-    insert_str(&mut params, "page_key", &args.page_key);
-
-    // Resolve names to addresses
-    insert_bool(&mut params, "resolve", args.resolve);
+    let query = ListQuery {
+        creator: args.creator,
+        receiver: args.receiver,
+        current_owner: args.current_owner,
+        previous_owner: args.previous_owner,
+        media_type: args.media_type,
+        media_subtype: args.media_subtype,
+        content_type: args.content_type,
+        content_sha: args.content_sha,
+        block_number: args.block_number,
+        block_hash: args.block_hash,
+        after_block: args.after_block,
+        before_block: args.before_block,
+        attachment_sha: args.attachment_sha,
+        attachment_content_type: args.attachment_content_type,
+        attachment_present: args.attachment_present,
+        token_tick: args.token_tick,
+        token_protocol: args.token_protocol,
+        transferred_in_tx: args.transferred_in_tx,
+        transaction_hash_only: args.transaction_hash_only,
+        sort_by: args.sort_by,
+        reverse: args.reverse,
+        page_size: args.page_size,
+        page_key: args.page_key,
+        resolve: args.resolve,
+    };
 
     let list_result = client
-        .fetch_ethscriptions(&params)
+        .fetch_ethscriptions(query)
         .await
         .map_err(|e| e.to_string())?;
 
