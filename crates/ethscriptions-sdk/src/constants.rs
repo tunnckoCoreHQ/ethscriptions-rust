@@ -9,6 +9,3 @@ pub const ENS_API_URL: &str = "https://api.ensdata.net";
 
 /// URL of the ethgastracker.com latest gas prices API.
 pub const GAS_API_URL: &str = "https://www.ethgastracker.com/api/gas/latest";
-
-/// Default Ethereum JSON-RPC URL for submitting inscriptions.
-pub const RPC_URL: &str = "https://ethereum-rpc.publicnode.com";

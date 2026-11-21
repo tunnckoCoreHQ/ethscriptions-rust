@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use std::collections::HashMap;
-use std::fs;
-use std::path::Path;
-
 use alloy::eips::eip4844::BlobTransactionSidecar;
 use alloy::eips::eip4844::builder::{SidecarBuilder, SimpleCoder};
 use alloy::network::{EthereumWallet, TransactionBuilder, TransactionBuilder4844};
@@ -14,7 +10,7 @@ use alloy_signer_local::{MnemonicBuilder, PrivateKeySigner, coins_bip39::English
 use serde::Serialize;
 
 use crate::client::Client;
-use crate::encode::{InputSource, prepare_payload};
+use crate::encode::prepare_payload;
 pub use crate::encode::{PrepareInscribeOptions, PreparedInscribe};
 use crate::error::ApiError;
 use crate::types::EstimateCostResult;
@@ -54,17 +50,9 @@ pub enum InscribeResult {
 #[derive(Debug, Clone)]
 pub struct InscribeOptions {
     pub bytes: Vec<u8>,
-    pub source: InputSource,
-    pub optimize: bool,
-    pub gzip: bool,
-    pub esip6: bool,
-    pub skip_content_type: bool,
+    pub prepare: PrepareInscribeOptions,
     pub blobs: bool,
     pub dry_run: bool,
-    pub private_key: Option<String>,
-    pub mnemonic: Option<String>,
-    pub env_file: Option<String>,
-    pub rpc_url: Option<String>,
     pub to: Option<String>,
     pub chain_id: u64,
 }
@@ -83,29 +71,17 @@ pub async fn prepare_inscribe(
 
 pub async fn inscribe(
     client: &Client,
+    signer: PrivateKeySigner,
+    rpc_url: &str,
     options: &InscribeOptions,
 ) -> Result<InscribeResult, ApiError> {
-    let signer_inputs = resolve_signer_inputs(options)?;
-    let signer = build_signer(&signer_inputs)?;
     let from = signer.address();
     let to = resolve_to_address(options.to.as_deref(), from)?;
 
-    let (prepared, estimate) = prepare_inscribe(
-        client,
-        &options.bytes,
-        &PrepareInscribeOptions {
-            source: options.source,
-            optimize: options.optimize,
-            gzip: options.gzip,
-            esip6: options.esip6,
-            skip_content_type: options.skip_content_type,
-            data_uri_limit: 500,
-        },
-    )
-    .await?;
+    let (prepared, estimate) = prepare_inscribe(client, &options.bytes, &options.prepare).await?;
 
     let exists = client.check_exists(&prepared.sha).await?;
-    if exists.exists && !options.esip6 {
+    if exists.exists && !options.prepare.esip6 {
         return Err(ApiError::bad_request(format!(
             "Ethscription already exists for sha {}. Use esip6 to allow duplicates.",
             prepared.sha
@@ -132,13 +108,7 @@ pub async fn inscribe(
         })));
     }
 
-    let provider = provider_with_signer(
-        signer,
-        signer_inputs
-            .rpc_url
-            .unwrap_or_else(|| client.rpc_url.clone()),
-        normalized_chain_id(options.chain_id),
-    )?;
+    let provider = provider_with_signer(signer, rpc_url, normalized_chain_id(options.chain_id))?;
 
     let request = build_transaction_request(
         from,
@@ -164,68 +134,21 @@ pub async fn inscribe(
     }))
 }
 
+pub fn private_key_signer(private_key: &str) -> Result<PrivateKeySigner, ApiError> {
+    normalize_private_key(private_key)
+        .parse()
+        .map_err(|e| ApiError::bad_request(format!("Failed to parse private key signer: {e}")))
+}
+
+pub fn mnemonic_signer(mnemonic: &str) -> Result<PrivateKeySigner, ApiError> {
+    MnemonicBuilder::<English>::default()
+        .phrase(mnemonic)
+        .build()
+        .map_err(|e| ApiError::bad_request(format!("Failed to parse mnemonic signer: {e}")))
+}
+
 fn normalized_chain_id(chain_id: u64) -> u64 {
     if chain_id == 0 { 1 } else { chain_id }
-}
-
-struct ResolvedSignerInputs {
-    private_key: Option<String>,
-    mnemonic: Option<String>,
-    rpc_url: Option<String>,
-}
-
-fn resolve_signer_inputs(options: &InscribeOptions) -> Result<ResolvedSignerInputs, ApiError> {
-    let env_file = if let Some(path) = &options.env_file {
-        read_env_file(path)?
-    } else {
-        HashMap::new()
-    };
-
-    let private_key = options
-        .private_key
-        .clone()
-        .or_else(|| env_file.get("ETHS_PRIVATE_KEY").cloned())
-        .or_else(|| std::env::var("ETHS_PRIVATE_KEY").ok());
-    let mnemonic = options
-        .mnemonic
-        .clone()
-        .or_else(|| env_file.get("ETHS_MNEMONIC").cloned())
-        .or_else(|| std::env::var("ETHS_MNEMONIC").ok());
-    let rpc_url = options
-        .rpc_url
-        .clone()
-        .or_else(|| env_file.get("ETHS_RPC_URL").cloned())
-        .or_else(|| std::env::var("ETHS_RPC_URL").ok());
-
-    if private_key.is_none() && mnemonic.is_none() {
-        return Err(ApiError::bad_request(
-            "Missing signer. Pass private_key or mnemonic, or set ETHS_PRIVATE_KEY / ETHS_MNEMONIC.",
-        ));
-    }
-
-    Ok(ResolvedSignerInputs {
-        private_key,
-        mnemonic,
-        rpc_url,
-    })
-}
-
-fn build_signer(inputs: &ResolvedSignerInputs) -> Result<PrivateKeySigner, ApiError> {
-    if let Some(private_key) = &inputs.private_key {
-        let normalized = normalize_private_key(private_key);
-        return normalized.parse().map_err(|e| {
-            ApiError::bad_request(format!("Failed to parse private key signer: {e}"))
-        });
-    }
-
-    if let Some(mnemonic) = &inputs.mnemonic {
-        return MnemonicBuilder::<English>::default()
-            .phrase(mnemonic)
-            .build()
-            .map_err(|e| ApiError::bad_request(format!("Failed to parse mnemonic signer: {e}")));
-    }
-
-    Err(ApiError::bad_request("No signer input provided"))
 }
 
 fn normalize_private_key(private_key: &str) -> String {
@@ -247,7 +170,7 @@ fn resolve_to_address(value: Option<&str>, fallback: Address) -> Result<Address,
 
 fn provider_with_signer(
     signer: PrivateKeySigner,
-    rpc_url: String,
+    rpc_url: &str,
     chain_id: u64,
 ) -> Result<impl Provider, ApiError> {
     let wallet = EthereumWallet::new(signer);
@@ -287,41 +210,4 @@ fn build_blob_sidecar(data: &[u8]) -> Result<BlobTransactionSidecar, ApiError> {
     SidecarBuilder::<SimpleCoder>::from_slice(data)
         .build_4844()
         .map_err(|e| ApiError::internal(format!("Failed to build blob sidecar: {e}")))
-}
-
-fn read_env_file(path: impl AsRef<Path>) -> Result<HashMap<String, String>, ApiError> {
-    let content = fs::read_to_string(path.as_ref()).map_err(|e| {
-        ApiError::bad_request(format!(
-            "Failed to read env file '{}': {e}",
-            path.as_ref().display()
-        ))
-    })?;
-    let mut values = HashMap::new();
-
-    for raw_line in content.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if let Some((key, value)) = line.split_once('=') {
-            values.insert(
-                key.trim().to_string(),
-                strip_quotes(value.trim()).to_string(),
-            );
-        }
-    }
-
-    Ok(values)
-}
-
-fn strip_quotes(value: &str) -> &str {
-    if value.len() >= 2 {
-        let bytes = value.as_bytes();
-        if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
-            || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
-        {
-            return &value[1..value.len() - 1];
-        }
-    }
-    value
 }
