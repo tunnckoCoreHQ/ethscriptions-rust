@@ -7,7 +7,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::types::{
-    Ethscription, EthscriptionTransfer, NumbersResult, OwnersResult, RawEthscription, RawTransfer,
+    Ethscription, EthscriptionTransfer, FieldSelection, NumbersResult, OwnersResult,
+    RawEthscription, RawTransfer, Record,
 };
 
 // ---------------------------------------------------------------------------
@@ -303,216 +304,204 @@ pub fn normalize_transfers(raw_transfers: &[RawTransfer]) -> Vec<EthscriptionTra
     transfers
 }
 
-/// Extract ownership chain from normalized and raw ethscription + transfers.
-pub fn extract_owners(
-    ethscription: &Ethscription,
-    raw: &RawEthscription,
-    transfers: &[EthscriptionTransfer],
-) -> OwnersResult {
-    let (latest_ts, latest_block, latest_hash) = if let Some(t) = transfers.first() {
-        (
-            t.block_timestamp.clone(),
-            t.block_number.clone(),
-            t.transaction_hash.clone(),
-        )
-    } else {
-        (
-            ethscription.block_timestamp.clone(),
-            ethscription.block_number.clone(),
-            ethscription.transaction_hash.clone(),
-        )
-    };
-
-    OwnersResult {
-        creator: ethscription.creator.clone(),
-        current: raw.current_owner.clone().unwrap_or_default(),
-        initial: ethscription.receiver.clone(),
-        latest_transfer_block: latest_block,
-        latest_transfer_datetime: timestamp_to_datetime(&latest_ts),
-        latest_transfer_hash: latest_hash,
-        latest_transfer_timestamp: latest_ts.clone(),
-        previous: raw.previous_owner.clone().unwrap_or_default(),
+impl From<RawEthscription> for Record {
+    fn from(raw: RawEthscription) -> Self {
+        Self {
+            normalized: normalize_ethscription(&raw),
+            raw,
+        }
     }
 }
 
-/// Extract numbering and statistics from normalized and raw ethscription + transfers.
-pub fn extract_numbers(
-    ethscription: &Ethscription,
-    raw: &RawEthscription,
-    transfers: &[EthscriptionTransfer],
-) -> NumbersResult {
-    let eth_num_str = raw
-        .ethscription_number
-        .as_ref()
-        .map(value_to_string)
-        .unwrap_or_default();
-
-    let eth_num = if eth_num_str.is_empty() {
-        None
-    } else {
-        Some(eth_num_str.clone())
-    };
-
-    NumbersResult {
-        block_datetime: ethscription.block_datetime.clone(),
-        block_hash: ethscription.block_hash.clone(),
-        block_number: ethscription.block_number.clone(),
-        block_number_fmt: numfmt(&ethscription.block_number, ","),
-        block_timestamp: ethscription.block_timestamp.clone(),
-        ethscription_number: eth_num.clone(),
-        ethscription_number_fmt: numfmt(&eth_num.unwrap_or_default(), ","),
-        ethscription_transfers: transfers.len().to_string(),
-        event_log_index: ethscription.event_log_index.clone(),
-        transaction_index: ethscription.transaction_index.clone(),
-    }
-}
-
-/// Apply `with`/`only` field selection to a normalized ethscription.
-///
-/// This mirrors the TS `normalizeResult` field selection logic:
-/// - `only` (comma-separated): keep only these fields from the normalized output
-/// - `with` (comma-separated): add extra fields not in the default normalized output,
-///   pulling from the normalized result first, then from raw upstream data
-///
-/// Special handling:
-/// - `content_uri` and `event_log_index`: skipped by default, pulled from raw when requested
-/// - `ethscription_transfers`: normalized through `normalize_transfers()` when requested
-/// - `transfers`: alias for `ethscription_transfers` but output as `transfers`
-///
-/// The `latest_transfer` flag adds `latest_transfer_hash` and `latest_transfer_block` fields
-/// computed from the most recent transfer.
-///
-/// Returns a `serde_json::Value` (object) because the output shape is dynamic.
-pub fn apply_field_selection(
-    normalized: &Ethscription,
-    raw: &RawEthscription,
-    with_fields: Option<&str>,
-    only_fields: Option<&str>,
-    latest_transfer: Option<bool>,
-) -> serde_json::Value {
-    let include_latest_transfer = latest_transfer.unwrap_or(false);
-    let norm_value = serde_json::to_value(normalized).unwrap_or(serde_json::Value::Null);
-    let raw_value = serde_json::to_value(raw).unwrap_or(serde_json::Value::Null);
-
-    let norm_obj = match &norm_value {
-        serde_json::Value::Object(m) => m,
-        _ => return norm_value,
-    };
-    let raw_obj = match &raw_value {
-        serde_json::Value::Object(m) => m,
-        _ => &serde_json::Map::new(),
-    };
-
-    let onlys: Vec<&str> = only_fields
-        .filter(|s| !s.is_empty())
-        .map(|s| s.split(',').map(str::trim).collect())
-        .unwrap_or_default();
-
-    let withs: Vec<&str> = with_fields
-        .filter(|s| !s.is_empty())
-        .map(|s| s.split(',').map(str::trim).collect())
-        .unwrap_or_default();
-
-    // Step 1: apply `only` filter (or keep all), excluding event_log_index by default
-    let mut result = serde_json::Map::new();
-    for (key, val) in norm_obj {
-        // Skip event_log_index unless explicitly requested via --with
-        if key == "event_log_index" && !withs.contains(&"event_log_index") {
-            continue;
-        }
-        if onlys.is_empty() || onlys.contains(&key.as_str()) {
-            result.insert(key.clone(), val.clone());
+impl Record {
+    /// Normalized transfers, newest first.
+    pub fn transfers(&self) -> Vec<EthscriptionTransfer> {
+        match &self.raw.ethscription_transfers {
+            Some(transfers) => normalize_transfers(transfers),
+            None => Vec::new(),
         }
     }
 
-    // Pre-compute normalized transfers if any transfer-related fields are requested
-    let needs_transfers = include_latest_transfer
-        || withs
-            .iter()
-            .any(|w| *w == "ethscription_transfers" || *w == "transfers");
+    pub fn owners(&self) -> OwnersResult {
+        let ethscription = &self.normalized;
+        let transfers = self.transfers();
+        let (latest_ts, latest_block, latest_hash) = if let Some(t) = transfers.first() {
+            (
+                t.block_timestamp.clone(),
+                t.block_number.clone(),
+                t.transaction_hash.clone(),
+            )
+        } else {
+            (
+                ethscription.block_timestamp.clone(),
+                ethscription.block_number.clone(),
+                ethscription.transaction_hash.clone(),
+            )
+        };
 
-    let normalized_transfers = if needs_transfers {
-        raw.ethscription_transfers
+        OwnersResult {
+            creator: ethscription.creator.clone(),
+            current: self.raw.current_owner.clone().unwrap_or_default(),
+            initial: ethscription.receiver.clone(),
+            latest_transfer_block: latest_block,
+            latest_transfer_datetime: timestamp_to_datetime(&latest_ts),
+            latest_transfer_hash: latest_hash,
+            latest_transfer_timestamp: latest_ts.clone(),
+            previous: self.raw.previous_owner.clone().unwrap_or_default(),
+        }
+    }
+
+    pub fn numbers(&self) -> NumbersResult {
+        let ethscription = &self.normalized;
+        let eth_num_str = self
+            .raw
+            .ethscription_number
             .as_ref()
-            .map(|t| normalize_transfers(t))
-    } else {
-        None
-    };
+            .map(value_to_string)
+            .unwrap_or_default();
 
-    // Step 2: Handle --latest-transfer flag
-    if include_latest_transfer
-        && let Some(ref transfers) = normalized_transfers
-        && let Some(latest) = transfers.first()
-    {
-        result.insert(
-            "latest_transfer_hash".to_string(),
-            serde_json::Value::String(latest.transaction_hash.clone()),
-        );
-        result.insert(
-            "latest_transfer_block".to_string(),
-            serde_json::Value::String(latest.block_number.clone()),
-        );
+        let eth_num = if eth_num_str.is_empty() {
+            None
+        } else {
+            Some(eth_num_str.clone())
+        };
+
+        NumbersResult {
+            block_datetime: ethscription.block_datetime.clone(),
+            block_hash: ethscription.block_hash.clone(),
+            block_number: ethscription.block_number.clone(),
+            block_number_fmt: numfmt(&ethscription.block_number, ","),
+            block_timestamp: ethscription.block_timestamp.clone(),
+            ethscription_number: eth_num.clone(),
+            ethscription_number_fmt: numfmt(&eth_num.unwrap_or_default(), ","),
+            ethscription_transfers: self.transfers().len().to_string(),
+            event_log_index: ethscription.event_log_index.clone(),
+            transaction_index: ethscription.transaction_index.clone(),
+        }
     }
 
-    // Step 3: apply `with` — add fields from raw (these are stripped from normalized by default)
-    // For content_uri and event_log_index, always pull from raw since they're skipped in serialization
-    for w in &withs {
-        let key = w.to_string();
+    /// Apply field selection to the normalized ethscription.
+    ///
+    /// - `only`: keep only these fields from the normalized output
+    /// - `with`: add extra fields not in the default normalized output,
+    ///   pulling from the raw upstream data first, then from the normalized result
+    ///
+    /// Special handling:
+    /// - `ethscription_transfers`: normalized through `normalize_transfers()` when requested
+    /// - `transfers`: alias for `ethscription_transfers` but output as `transfers`
+    ///
+    /// The `latest_transfer` flag adds `latest_transfer_hash` and `latest_transfer_block` fields
+    /// computed from the most recent transfer.
+    pub fn select(&self, selection: &FieldSelection) -> Value {
+        let withs = &selection.with;
+        let onlys = &selection.only;
+        let wants = |field: &str| withs.iter().any(|w| w == field);
 
-        // Special handling for transfers - normalize them and optionally rename
-        if key == "ethscription_transfers" || key == "transfers" {
-            let output_key = if key == "transfers" {
-                "transfers"
-            } else {
-                "ethscription_transfers"
-            };
+        let norm_value = serde_json::to_value(&self.normalized).unwrap_or(Value::Null);
+        let raw_value = serde_json::to_value(&self.raw).unwrap_or(Value::Null);
 
-            if !result.contains_key(output_key)
-                && let Some(ref transfers) = normalized_transfers
-                && let Ok(transfers_json) = serde_json::to_value(transfers)
-            {
-                result.insert(output_key.to_string(), transfers_json);
+        let norm_obj = match &norm_value {
+            Value::Object(m) => m,
+            _ => return norm_value,
+        };
+        let raw_obj = match &raw_value {
+            Value::Object(m) => m,
+            _ => &serde_json::Map::new(),
+        };
+
+        let mut result = serde_json::Map::new();
+        for (key, val) in norm_obj {
+            if key == "event_log_index" && !wants("event_log_index") {
+                continue;
             }
-            continue;
+            if onlys.is_empty() || onlys.contains(key) {
+                result.insert(key.clone(), val.clone());
+            }
         }
 
-        // event_log_index - pull from raw
-        if key == "event_log_index" && !result.contains_key(&key) {
-            if let Some(v) = raw_obj.get(&key) {
-                // Only insert if not null
-                if !v.is_null() {
-                    result.insert(key, v.clone());
+        let needs_transfers =
+            selection.latest_transfer || wants("ethscription_transfers") || wants("transfers");
+
+        let normalized_transfers = if needs_transfers {
+            self.raw
+                .ethscription_transfers
+                .as_ref()
+                .map(|t| normalize_transfers(t))
+        } else {
+            None
+        };
+
+        if selection.latest_transfer
+            && let Some(ref transfers) = normalized_transfers
+            && let Some(latest) = transfers.first()
+        {
+            result.insert(
+                "latest_transfer_hash".to_string(),
+                Value::String(latest.transaction_hash.clone()),
+            );
+            result.insert(
+                "latest_transfer_block".to_string(),
+                Value::String(latest.block_number.clone()),
+            );
+        }
+
+        for key in withs {
+            if key == "ethscription_transfers" || key == "transfers" {
+                if !result.contains_key(key)
+                    && let Some(ref transfers) = normalized_transfers
+                    && let Ok(transfers_json) = serde_json::to_value(transfers)
+                {
+                    result.insert(key.clone(), transfers_json);
+                }
+                continue;
+            }
+
+            if key == "event_log_index" && !result.contains_key(key) {
+                if let Some(v) = raw_obj.get(key)
+                    && !v.is_null()
+                {
+                    result.insert(key.clone(), v.clone());
+                }
+                continue;
+            }
+
+            if !result.contains_key(key) {
+                if let Some(v) = raw_obj.get(key) {
+                    result.insert(key.clone(), v.clone());
+                } else if let Some(v) = norm_obj.get(key) {
+                    result.insert(key.clone(), v.clone());
                 }
             }
-            continue;
         }
 
-        if !result.contains_key(&key) {
-            // For fields that are skipped in serialization, pull from raw
-            if let Some(v) = raw_obj.get(&key) {
-                result.insert(key, v.clone());
-            } else if let Some(v) = norm_obj.get(&key) {
-                result.insert(key, v.clone());
-            }
+        Value::Object(result)
+    }
+}
+
+impl FieldSelection {
+    /// Parse the comma-separated `with` and `only` lists. Each item is trimmed.
+    pub fn new(with: Option<&str>, only: Option<&str>, latest_transfer: bool) -> Self {
+        Self {
+            with: split_fields(with),
+            only: split_fields(only),
+            latest_transfer,
         }
     }
 
-    serde_json::Value::Object(result)
+    /// Add `field` to `with` unless it is already there.
+    pub fn with_field(mut self, field: &str) -> Self {
+        if !self.with.iter().any(|w| w == field) {
+            self.with.push(field.to_string());
+        }
+        self
+    }
 }
 
-/// Apply `with`/`only` field selection to a list of normalized ethscriptions.
-pub fn apply_field_selection_list(
-    normalized: &[Ethscription],
-    raws: &[RawEthscription],
-    with_fields: Option<&str>,
-    only_fields: Option<&str>,
-    latest_transfer: Option<bool>,
-) -> Vec<serde_json::Value> {
-    normalized
-        .iter()
-        .zip(raws.iter())
-        .map(|(n, r)| apply_field_selection(n, r, with_fields, only_fields, latest_transfer))
-        .collect()
+fn split_fields(fields: Option<&str>) -> Vec<String> {
+    fields
+        .filter(|s| !s.is_empty())
+        .map(|s| s.split(',').map(|f| f.trim().to_string()).collect())
+        .unwrap_or_default()
 }
 
 /// Format a numeric string with delimiter (e.g. `"1234567"` -> `"1,234,567"`).
@@ -756,6 +745,19 @@ mod tests {
         assert_eq!(transfers[1].is_contract_transfer, false);
     }
 
+    fn select(
+        raw: RawEthscription,
+        with: Option<&str>,
+        only: Option<&str>,
+        latest_transfer: Option<bool>,
+    ) -> Value {
+        Record::from(raw).select(&FieldSelection::new(
+            with,
+            only,
+            latest_transfer.unwrap_or(false),
+        ))
+    }
+
     fn make_test_raw() -> RawEthscription {
         RawEthscription {
             attachment_content_type: None,
@@ -786,10 +788,9 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_field_selection_no_filters() {
+    fn test_select_no_filters() {
         let raw = make_test_raw();
-        let normalized = normalize_ethscription(&raw);
-        let result = apply_field_selection(&normalized, &raw, None, None, None);
+        let result = select(raw, None, None, None);
         let obj = result.as_object().unwrap();
 
         // Should have all default fields
@@ -807,16 +808,9 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_field_selection_only() {
+    fn test_select_only() {
         let raw = make_test_raw();
-        let normalized = normalize_ethscription(&raw);
-        let result = apply_field_selection(
-            &normalized,
-            &raw,
-            None,
-            Some("transaction_hash,creator"),
-            None,
-        );
+        let result = select(raw, None, Some("transaction_hash,creator"), None);
         let obj = result.as_object().unwrap();
 
         assert_eq!(obj.len(), 2);
@@ -825,18 +819,11 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_field_selection_with_from_raw() {
+    fn test_select_with_from_raw() {
         let raw = make_test_raw();
-        let normalized = normalize_ethscription(&raw);
         // current_owner is not in normalized at all, but exists in raw
         // content_uri is skipped in normalized, so `with` pulls it from raw
-        let result = apply_field_selection(
-            &normalized,
-            &raw,
-            Some("current_owner,content_uri"),
-            None,
-            None,
-        );
+        let result = select(raw, Some("current_owner,content_uri"), None, None);
         let obj = result.as_object().unwrap();
 
         // Should include extra field pulled from raw
@@ -851,12 +838,10 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_field_selection_with_and_only_combined() {
+    fn test_select_with_and_only_combined() {
         let raw = make_test_raw();
-        let normalized = normalize_ethscription(&raw);
-        let result = apply_field_selection(
-            &normalized,
-            &raw,
+        let result = select(
+            raw,
             Some("ethscription_number,current_owner"),
             Some("transaction_hash,creator"),
             None,
@@ -873,43 +858,14 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_field_selection_with_existing_field_no_duplicate() {
+    fn test_select_with_existing_field_no_duplicate() {
         let raw = make_test_raw();
-        let normalized = normalize_ethscription(&raw);
         // "creator" is already in the normalized output — `with` should not duplicate it
-        let result = apply_field_selection(&normalized, &raw, Some("creator"), None, None);
+        let result = select(raw, Some("creator"), None, None);
         let obj = result.as_object().unwrap();
 
         // creator should appear exactly once
         assert_eq!(obj["creator"], "0xcreator");
-    }
-
-    #[test]
-    fn test_apply_field_selection_list() {
-        let raw1 = make_test_raw();
-        let mut raw2 = make_test_raw();
-        raw2.transaction_hash = "0xdef456".to_string();
-
-        let norm1 = normalize_ethscription(&raw1);
-        let norm2 = normalize_ethscription(&raw2);
-
-        let results = apply_field_selection_list(
-            &[norm1, norm2],
-            &[raw1, raw2],
-            None,
-            Some("transaction_hash"),
-            None,
-        );
-
-        assert_eq!(results.len(), 2);
-        assert_eq!(
-            results[0].as_object().unwrap()["transaction_hash"],
-            "0xabc123"
-        );
-        assert_eq!(
-            results[1].as_object().unwrap()["transaction_hash"],
-            "0xdef456"
-        );
     }
 
     fn make_test_raw_with_transfers() -> RawEthscription {
@@ -944,16 +900,9 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_field_selection_with_ethscription_transfers() {
+    fn test_select_with_ethscription_transfers() {
         let raw = make_test_raw_with_transfers();
-        let normalized = normalize_ethscription(&raw);
-        let result = apply_field_selection(
-            &normalized,
-            &raw,
-            Some("ethscription_transfers"),
-            None,
-            None,
-        );
+        let result = select(raw, Some("ethscription_transfers"), None, None);
         let obj = result.as_object().unwrap();
 
         // Should include normalized transfers
@@ -971,10 +920,9 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_field_selection_with_transfers_alias() {
+    fn test_select_with_transfers_alias() {
         let raw = make_test_raw_with_transfers();
-        let normalized = normalize_ethscription(&raw);
-        let result = apply_field_selection(&normalized, &raw, Some("transfers"), None, None);
+        let result = select(raw, Some("transfers"), None, None);
         let obj = result.as_object().unwrap();
 
         // Should use "transfers" as the output key (not "ethscription_transfers")
@@ -989,10 +937,9 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_field_selection_transfers_no_data() {
+    fn test_select_transfers_no_data() {
         let raw = make_test_raw(); // No transfers
-        let normalized = normalize_ethscription(&raw);
-        let result = apply_field_selection(&normalized, &raw, Some("transfers"), None, None);
+        let result = select(raw, Some("transfers"), None, None);
         let obj = result.as_object().unwrap();
 
         // Should not include transfers key when there's no data
@@ -1000,10 +947,9 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_field_selection_with_latest_transfer_flag() {
+    fn test_select_with_latest_transfer_flag() {
         let raw = make_test_raw_with_transfers();
-        let normalized = normalize_ethscription(&raw);
-        let result = apply_field_selection(&normalized, &raw, None, None, Some(true));
+        let result = select(raw, None, None, Some(true));
         let obj = result.as_object().unwrap();
 
         // Should include latest_transfer_hash and latest_transfer_block from the newest transfer (block 200)
@@ -1014,10 +960,9 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_field_selection_latest_transfer_no_transfers() {
+    fn test_select_latest_transfer_no_transfers() {
         let raw = make_test_raw(); // No transfers
-        let normalized = normalize_ethscription(&raw);
-        let result = apply_field_selection(&normalized, &raw, None, None, Some(true));
+        let result = select(raw, None, None, Some(true));
         let obj = result.as_object().unwrap();
 
         // Should not include latest_transfer fields when there's no data

@@ -53,12 +53,13 @@ pub async fn run_content(client: &Client, args: ContentArgs) -> Result<(), Strin
         parse_ethscription_id(&raw).ok_or_else(|| format!("Invalid ethscription ID: '{raw}'"))?;
 
     // Fetch the ethscription — use the raw upstream response which always has content_uri
-    let (_ethscription, raw_resp) = client
+    let record = client
         .fetch_ethscription(&id)
         .await
         .map_err(|e| e.to_string())?;
 
-    let content_uri = raw_resp
+    let content_uri = record
+        .raw
         .content_uri
         .as_deref()
         .ok_or_else(|| "Ethscription has no content URI".to_string())?;

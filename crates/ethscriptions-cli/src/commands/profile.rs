@@ -4,9 +4,7 @@ use std::collections::HashMap;
 
 use clap::Args;
 use ethscriptions_sdk::client::Client;
-use ethscriptions_sdk::normalize::apply_field_selection_list;
-use ethscriptions_sdk::types::{Ethscription, EthscriptionListResult, Pagination, RawEthscription};
-use ethscriptions_sdk::validate::is_valid_address;
+use ethscriptions_sdk::types::{FieldSelection, Pagination, RawEthscription};
 use serde::Serialize;
 
 use crate::input::require_text_arg;
@@ -68,44 +66,27 @@ pub async fn run(client: &Client, args: ProfileArgs, pretty: bool) -> Result<(),
         return Ok(());
     }
 
-    let list_result = fetch_profile_state(client, &name).await?;
-
-    if args.info {
-        print_profile_info(client, &list_result.raws, pretty).await?;
-        return Ok(());
-    }
-
-    let output = build_profile_output(&list_result.result, &list_result.raws, &args, &name)?;
-    print_json(&output, pretty);
-    Ok(())
-}
-
-async fn fetch_profile_state(
-    client: &Client,
-    name: &str,
-) -> Result<EthscriptionListResult, String> {
-    let mut params = HashMap::new();
-    params.insert("creator".to_string(), name.to_string());
-    params.insert(
-        "media_subtype".to_string(),
-        "vnd.esc.user.profile+json".to_string(),
-    );
-    params.insert("media_type".to_string(), "application".to_string());
-
-    if !is_valid_address(name) {
-        params.insert("resolve".to_string(), "true".to_string());
-    }
-
-    let list_result = client
-        .fetch_ethscriptions(&params)
+    let profile = client
+        .fetch_user_profile(&name)
         .await
         .map_err(|e| e.to_string())?;
 
-    if list_result.result.is_empty() {
-        return Err(format!("Not found: No user profile found for {name}"));
+    if args.info {
+        print_profile_info(client, &profile.latest.raw, pretty).await?;
+        return Ok(());
     }
 
-    Ok(list_result)
+    let selection = field_selection(&args).with_field("content_uri");
+    let output = ProfileOutput {
+        latest: profile.latest.select(&selection),
+        previous: profile
+            .previous
+            .iter()
+            .map(|record| record.select(&selection))
+            .collect(),
+    };
+    print_json(&output, pretty);
+    Ok(())
 }
 
 async fn fetch_profile_list(
@@ -135,54 +116,26 @@ async fn fetch_profile_list(
             .map_err(|e| e.to_string())?
     };
 
-    let selected = apply_field_selection_list(
-        &list_result.result,
-        &list_result.raws,
-        args.with_fields.as_deref(),
-        args.only.as_deref(),
-        None,
-    );
-
+    let selection = field_selection(args);
     Ok(ListOutput {
-        result: selected,
+        result: list_result
+            .records
+            .iter()
+            .map(|record| record.select(&selection))
+            .collect(),
         pagination: list_result.pagination,
     })
 }
 
-fn build_profile_output(
-    ethscriptions: &[Ethscription],
-    raws: &[RawEthscription],
-    args: &ProfileArgs,
-    name: &str,
-) -> Result<ProfileOutput<serde_json::Value>, String> {
-    let with_fields = force_content_uri(args.with_fields.as_deref());
-    let selected = apply_field_selection_list(
-        ethscriptions,
-        raws,
-        with_fields.as_deref(),
-        args.only.as_deref(),
-        None,
-    );
-
-    let mut iter = selected.into_iter();
-    let latest = iter
-        .next()
-        .ok_or_else(|| format!("Not found: No user profile found for {name}"))?;
-
-    Ok(ProfileOutput {
-        latest,
-        previous: iter.collect(),
-    })
+fn field_selection(args: &ProfileArgs) -> FieldSelection {
+    FieldSelection::new(args.with_fields.as_deref(), args.only.as_deref(), false)
 }
 
 async fn print_profile_info(
     client: &Client,
-    raws: &[RawEthscription],
+    latest: &RawEthscription,
     pretty: bool,
 ) -> Result<(), String> {
-    let latest = raws
-        .first()
-        .ok_or_else(|| "Not found: No user profile found".to_string())?;
     let content_uri = latest
         .content_uri
         .as_deref()
@@ -198,21 +151,4 @@ async fn print_profile_info(
 
     print_json(&value, pretty);
     Ok(())
-}
-
-fn force_content_uri(with_fields: Option<&str>) -> Option<String> {
-    match with_fields {
-        Some(fields) if !fields.trim().is_empty() => {
-            let mut items: Vec<&str> = fields
-                .split(',')
-                .map(str::trim)
-                .filter(|field| !field.is_empty())
-                .collect();
-            if !items.contains(&"content_uri") {
-                items.push("content_uri");
-            }
-            Some(items.join(","))
-        }
-        _ => Some("content_uri".to_string()),
-    }
 }
